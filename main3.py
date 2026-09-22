@@ -48,6 +48,14 @@ WARNA_WAJAH: dict[str, str] = {
     "kaget": "#d9a6f2",
 }
 
+BOBOT_EKSPRESI: dict[str, float] = {"sedih": 1.8, "netral": 0.7}
+"""Koreksi skor per ekspresi sebelum memilih juara (lalu dinormalkan ulang).
+
+Model dilatih pada akting dan menggabungkan 'calm' + 'neutral' ke netral, jadi
+bicara pelan/datar yang sebenarnya sedih hampir selalu jatuh ke netral. Bobot
+ini menggeser keputusan ke arah sedih. Heuristik, bukan hasil pengukuran:
+kalau terlalu sering salah sedih, turunkan 1.8; kalau masih kurang, naikkan."""
+
 NETRAL = {dof: 0.0 for dof in pose.DOF}
 
 CW, CH = 420, 570
@@ -216,6 +224,9 @@ def loop_wajah(
         skor: dict[str, float] = {}
         for i, p in enumerate(ema):
             skor[peta[i]] = skor.get(peta[i], 0.0) + float(p)
+        skor = {e: v * BOBOT_EKSPRESI.get(e, 1.0) for e, v in skor.items()}
+        total = sum(skor.values()) or 1.0
+        skor = {e: v / total for e, v in skor.items()}
         juara = max(skor, key=lambda e: skor[e])
         p4 = pose.hitung_pose(skor, ambang)
         # Log untuk diagnosis: label mentah model (sebelum digabung ke ekspresi)
@@ -254,10 +265,12 @@ def _garis_alis(sisi: int, alis: float, mulut_x: float) -> tuple[float, float, f
         # Marah: ujung dalam (dekat hidung) turun tajam, ujung luar naik.
         miring = min(46.0, -alis * 5.5)
     elif 0 <= alis < 5 and mulut_x < -1:
-        # Sedih: ujung dalam naik tinggi (alis "khawatir" berbentuk /\).
-        miring = -min(32.0, -mulut_x * 8.0)
+        # Sedih: ujung luar jatuh ke samping (alis "melorot"), ujung dalam naik.
+        miring = -min(44.0, -mulut_x * 11.0)
     luar = CX + sisi * 105
     dalam = CX + sisi * 32
+    if miring < 0:  # sedih: dominan ujung luar yang turun, bukan ujung dalam yang naik
+        return luar, y - miring * 0.75, dalam, y + miring * 0.25
     return luar, y - miring * 0.5, dalam, y + miring * 0.5
 
 
