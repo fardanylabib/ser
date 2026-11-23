@@ -1,12 +1,12 @@
 # SER Terminal
 
-Dengarkan ucapan dari mic, lalu gerakkan **servo wajah** robot sesuai emosinya. Emosi ucapan dideteksi dengan *Speech Emotion Recognition*, diterjemahkan ke 5 ekspresi (senyum, netral, sedih, marah, kaget), lalu jadi pose 4 derajat kebebasan yang dikirim ke ESP32 lewat USB-serial. Tidak ada GUI; tanpa servo, pose dicetak ke terminal.
+Dengarkan ucapan dari mic, lalu gerakkan **servo wajah** robot sesuai emosinya. Emosi ucapan dideteksi dengan *Speech Emotion Recognition*, diterjemahkan ke 5 ekspresi (senyum, netral, sedih, marah, kaget), lalu jadi pose untuk 11 servo wajah yang dikirim ke ESP32 lewat USB-serial. Tidak ada GUI; tanpa servo, pose dicetak ke terminal.
 
 ```
 PC (mic → VAD → wav2vec2 → pose) --USB/UART--> ESP32 --I2C--> PCA9685 --> servo
 ```
 
-Kode ESP32 → PCA9685 dibuat sendiri; program ini hanya mengirim teks lewat UART (protokolnya di bawah).
+ESP32 hanya **jembatan UART → I2C**: ia tidak mengolah data sedikit pun. Seluruh urusan PCA9685 (inisialisasi, 50 Hz, konversi nilai ke pulsa servo, kalibrasi) dikerjakan di PC; firmware ESP32 dibuat sendiri dan cukup meneruskan byte (lihat Protokol di bawah).
 
 ## Cara Kerja
 
@@ -25,7 +25,7 @@ mic → callback sounddevice → antrian audio
                               │
                      agregasi label → skor 5 ekspresi (+ EMA)
                               │
-                     blend pose 4-DOF → ESP32 (UART)
+                     blend pose (7 gerakan → 11 servo) → ESP32 (UART)
 ```
 
 Capture audio non-blocking: callback mic hanya menyalin blok ke antrian, sementara VAD dan inferensi dikerjakan di luar callback. Selama VAD bilang masih ada ucapan, tiap 0.3 detik model menilai 1.5 detik audio terakhir — jadi pose diperbarui selagi orang bicara, bukan menunggu kalimat selesai. Kalau inferensi tertinggal, jendela lama **dibuang** dan hanya yang terbaru dipakai.
@@ -39,7 +39,7 @@ Capture audio non-blocking: callback mic hanya menyalin blok ke antrian, sementa
 | `audio.py` | `PenangkapAudio` (sounddevice, non-blocking) + resampler |
 | `vad.py` | `SegmenterVAD`: Silero VAD → jendela ucapan |
 | `model_emosi.py` | `PengenalEmosi` (wav2vec2 HuggingFace) + peta label → ekspresi |
-| `pose.py` | Tabel pose 4-DOF + blend skor → pose |
+| `pose.py` | Tabel pose (7 gerakan → 11 servo) + blend skor → pose |
 | `pengendali.py` | `PengendaliEkspresi`: model → skor → pose → servo |
 | `servo.py` | `PengirimServo`: UART ke ESP32 (tanpa `--port` = cetak pose ke terminal) |
 | `konfigurasi.py` | Konstanta bersama (sample rate, ambang, jendela, dst.) |
@@ -104,30 +104,51 @@ Lima ekspresi. Label emosi model yang mirip **digabung** ke ekspresi yang sama �
 
 Label yang tidak dikenal (model custom) otomatis dipetakan ke netral dengan peringatan di log, jadi ganti model tidak membuat program crash.
 
-Skor **tidak** dipakai memilih satu pemenang, melainkan mem-blend pose. Tiap ekspresi punya pose penuh dalam 4 derajat kebebasan, dan pose akhir = jumlah pose berbobot skor, dikali gerbang keyakinan (`pose = gate × Σ skor × pose_penuh`). Ragu antara dua ekspresi = wajah campuran; makin yakin = amplitudo makin penuh; bingung total = netral. Setelah 2,5 detik tanpa ucapan, pose kembali netral.
+Skor **tidak** dipakai memilih satu pemenang, melainkan mem-blend pose. Tiap ekspresi punya pose penuh, dan pose akhir = jumlah pose berbobot skor, dikali gerbang keyakinan (`pose = gate × Σ skor × pose_penuh`). Ragu antara dua ekspresi = wajah campuran; makin yakin = amplitudo makin penuh; bingung total = netral. Setelah 2,5 detik tanpa ucapan, pose kembali netral.
 
-| DOF | Rentang | Arti |
-| --- | --- | --- |
-| buka mata | -10..10 | -10 full merem, 0 normal, 10 full melotot |
-| angkat alis | -10..10 | -10 mengernyit, 0 normal, 10 naik full |
-| mulut x | -10..10 | -10 menguncup, 0 normal, 10 senyum lebar |
-| mulut y | 0..10 | 0 mingkem, 10 menganga lebar |
+Pose dihitung dalam **7 gerakan**, lalu dibagikan ke **11 servo** (kiri dan kanan mendapat nilai sama):
 
-Tabel pose per-ekspresi ada di `pose.py` (`POSE_PENUH`), disusun mengikuti kombinasi Action Unit **FACS** — itu titik awal yang wajar, silakan tuning ke karakter mekanikmu. Bobot koreksi per ekspresi (mis. `sedih` ×1.8 karena model cenderung menaruh bicara pelan di netral) ada di `pengendali.py` (`BOBOT_EKSPRESI`); itu heuristik, bukan hasil pengukuran.
+| Gerakan | Rentang | Arti | Servo (channel PCA9685) |
+| --- | --- | --- | --- |
+| buka mata | -10..10 | -10 merem, 0 normal, 10 melotot | 0 kelopak kiri, 1 kelopak kanan |
+| angkat alis | -10..10 | -10 mengernyit, 10 naik | 2 alis kiri, 3 alis kanan |
+| mulut x | -10..10 | -10 menguncup, 10 senyum lebar | 4 sudut mulut kiri, 5 sudut mulut kanan |
+| mulut y | 0..10 | 0 mingkem, 10 menganga | 6 mulut buka |
+| mata x | -10..10 | -10 melirik kiri, 10 kanan | 7 mata kiri x, 8 mata kanan x |
+| mata y | -10..10 | -10 menunduk, 10 mendongak | 9 mata y |
+| sudut mata | -10..10 | -10 miring sedih, 10 miring marah | 10 sudut mata |
+
+Tabel pose per-ekspresi ada di `pose.py` (`POSE_PENUH`), disusun mengikuti kombinasi Action Unit **FACS** — itu titik awal yang wajar, silakan tuning ke karakter mekanikmu. Nilai `mata y` dan `sudut mata` per ekspresi (kaget mendongak, sedih menunduk, marah miring tajam) adalah **tebakan**, bukan hasil pengukuran; `mata x` sengaja 0 untuk semua ekspresi. Bobot koreksi per ekspresi (mis. `sedih` ×1.8 karena model cenderung menaruh bicara pelan di netral) ada di `pengendali.py` (`BOBOT_EKSPRESI`); itu juga heuristik.
 
 ## Protokol UART ke ESP32
 
-115200 baud 8N1, teks ASCII, satu baris per pose:
+ESP32 tidak mengolah data. PC mengirim perintah I2C yang sudah jadi, dibungkus bingkai biner (115200 baud 8N1):
 
 ```
-E,<buka mata>,<angkat alis>,<mulut x>,<mulut y>\n        contoh: E,-3,1,8,3
+[N] [alamat I2C] [byte data ...]        N = jumlah byte yang menyusul (alamat + data)
 ```
 
-- Semua bilangan bulat -10..10 (0 = netral), kecuali `mulut y` 0..10.
-- Pose dikirim tiap ~0,3 dtk selama ada ucapan dan berubah langsung, **tanpa interpolasi** — haluskan gerak servo di firmware ESP32.
-- Baris diulang tiap 0,5 dtk walau pose tetap (keepalive), sehingga ESP32 bisa mendeteksi PC putus (mis. tidak ada baris > 1–2 dtk).
-- Saat program ditutup (Ctrl+C) dikirim `E,0,0,0,0` (netral). ESP32 tidak perlu membalas apa pun.
-- Membuka port me-reset ESP32, jadi program menunggu ±2 dtk sebelum mengirim. Kalau kabel tercabut, program menyambung ulang otomatis tiap 2 dtk.
+**Firmware ESP32, seluruhnya:**
+
+1. baca 1 byte → `N`
+2. baca `N` byte berikutnya ke buffer
+3. `Wire.beginTransmission(buffer[0]); Wire.write(buffer + 1, N - 1); Wire.endTransmission();`
+4. ulangi
+
+Tidak perlu tahu apa itu PCA9685, servo, atau pose. Tidak ada balasan ke PC. Pastikan buffer cukup (bingkai terpanjang 47 byte; `Wire` ESP32 umumnya 128 byte; cek di versi core Anda) dan `Wire.begin()` serta `Serial.begin(115200)` dipanggil.
+
+**Yang dikirim PC** (semuanya di [servo.py](servo.py)):
+
+- Sekali tiap port tersambung: 4 bingkai inisialisasi PCA9685 (tidur, `PRESCALE` = 121 untuk 50 Hz, mode keluaran, bangun + auto-increment).
+- Tiap kali pose berubah: satu bingkai 47 byte yang menulis 11 channel PCA9685 sekaligus (4 byte per channel: `ON_L, ON_H, OFF_L, OFF_H`). Tidak ada pengulangan kalau pose tetap.
+- Saat program ditutup (Ctrl+C): bingkai pose netral.
+- Servo ke-n dipasang di channel PCA9685 ke-(n-1), sesuai tabel di atas. Alamat I2C default `0x40`.
+
+**Kalibrasi servo** ada di `KALIBRASI` di [servo.py](servo.py): untuk tiap servo, tick PWM pada nilai terendah dan tertinggi. Isi awalnya 205–410 tick (≈1,0–2,0 ms), aman untuk servo hobi umum tapi **belum dituning ke mekanikmu**. Sempitkan kalau servo menabrak batas mekanik, dan **tukar kedua angka** kalau servo terpasang berlawanan arah (mis. servo sisi kanan).
+
+- Pose berubah langsung tanpa interpolasi, dikirim tiap ~0,3 dtk selama ada ucapan. Karena ESP32 tidak mengolah apa pun, gerak servo mengikuti kecepatan servonya sendiri; bila ingin lebih halus, perkecil `--hop` atau tambahkan penghalusan di PC.
+- Membuka port me-reset ESP32, jadi program menunggu ±2 dtk sebelum mengirim. Kalau kabel tercabut, program menyambung ulang otomatis tiap 2 dtk dan menginisialisasi ulang PCA9685.
+- Tanpa `--port`, yang dicetak adalah 7 gerakan, bukan bingkai UART.
 
 ## Model
 

@@ -1,9 +1,9 @@
 """SER Terminal — dengar ucapan dari mic, gerakkan servo wajah (ESP32 + PCA9685).
 
 Emosi ucapan dideteksi wav2vec2 SER, diterjemahkan ke 5 ekspresi (senyum, netral,
-sedih, marah, kaget), lalu jadi pose 4-DOF yang dikirim ke ESP32 lewat USB-serial:
+sedih, marah, kaget), lalu jadi pose 11 servo yang dikirim ke ESP32 lewat USB-serial:
 
-    mic -> VAD -> wav2vec2 -> skor ekspresi -> pose 4-DOF
+    mic -> VAD -> wav2vec2 -> skor ekspresi -> pose 11 servo
         --USB/UART--> ESP32 --I2C--> PCA9685 --> servo
 
 File ini hanya perakit (CLI + menyambung objek). Logikanya ada di:
@@ -11,7 +11,7 @@ File ini hanya perakit (CLI + menyambung objek). Logikanya ada di:
     audio.py        PenangkapAudio (sounddevice, non-blocking)
     vad.py          SegmenterVAD (Silero VAD -> jendela ucapan)
     model_emosi.py  PengenalEmosi (wav2vec2 HuggingFace) + peta label -> ekspresi
-    pose.py         tabel pose 4-DOF + blend skor -> pose
+    pose.py         tabel pose (7 gerakan -> 11 servo) + blend skor -> pose
     pengendali.py   PengendaliEkspresi (model -> pose -> servo)
     servo.py        PengirimServo (UART ke ESP32; tanpa port = cetak ke terminal)
 

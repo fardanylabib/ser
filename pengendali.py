@@ -1,4 +1,4 @@
-"""Pengendali ekspresi: hasil model SER -> pose 4-DOF -> servo.
+"""Pengendali ekspresi: hasil model SER -> pose -> servo.
 
 Alur tiap jendela audio:
     probabilitas model -> EMA (peredam) -> skor 5 ekspresi -> pose -> kirim
@@ -94,7 +94,7 @@ class PengendaliEkspresi:
         """Antrean kosong: kembali ke netral kalau sudah lama diam, lalu kirim ulang pose."""
         if time.monotonic() - self.waktu_tebakan > IDLE_SEC:
             self.pose = dict(pose.NETRAL)
-        self.servo.kirim(self.pose)  # servo mengulang baris ini sebagai keepalive
+        self.servo.kirim(self.pose)  # servo hanya menulis kalau berubah; ini juga mencoba ulang saat port baru tersambung
 
     @staticmethod
     def _skor_ekspresi(probs: np.ndarray, peta: list[str]) -> dict[str, float]:
