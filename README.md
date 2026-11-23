@@ -1,12 +1,12 @@
 # SER Terminal
 
-Dengarkan ucapan dari mic, lalu gerakkan **servo wajah** robot sesuai emosinya. Emosi ucapan dideteksi dengan *Speech Emotion Recognition*, diterjemahkan ke 5 ekspresi (senyum, netral, sedih, marah, kaget), lalu jadi pose untuk 11 servo wajah yang dikirim ke ESP32 lewat USB-serial. Tidak ada GUI; tanpa servo, pose dicetak ke terminal.
+Dengarkan ucapan dari mic, lalu gerakkan **servo wajah** robot sesuai emosinya. Emosi ucapan dideteksi dengan *Speech Emotion Recognition*, diterjemahkan ke 5 ekspresi (senyum, netral, sedih, marah, kaget), lalu jadi pose untuk 11 servo wajah yang ditulis langsung ke PCA9685 lewat I2C. Dirancang untuk **Raspberry Pi**. Tidak ada GUI; tanpa servo, pose dicetak ke terminal.
 
 ```
-PC (mic → VAD → wav2vec2 → pose) --USB/UART--> ESP32 --I2C--> PCA9685 --> servo
+Raspberry Pi (mic → VAD → wav2vec2 → pose) --I2C--> PCA9685 --> servo
 ```
 
-ESP32 hanya **jembatan UART → I2C**: ia tidak mengolah data sedikit pun. Seluruh urusan PCA9685 (inisialisasi, 50 Hz, konversi nilai ke pulsa servo, kalibrasi) dikerjakan di PC; firmware ESP32 dibuat sendiri dan cukup meneruskan byte (lihat Protokol di bawah).
+Tidak ada mikrokontroler perantara: Pi menulis register PCA9685 sendiri (inisialisasi, 50 Hz, konversi nilai ke pulsa servo, kalibrasi) lewat `/dev/i2c-1`. Lihat [Pemasangan Hardware](#pemasangan-hardware-raspberry-pi).
 
 ## Cara Kerja
 
@@ -25,7 +25,7 @@ mic → callback sounddevice → antrian audio
                               │
                      agregasi label → skor 5 ekspresi (+ EMA)
                               │
-                     blend pose (7 gerakan → 11 servo) → ESP32 (UART)
+                     blend pose (7 gerakan → 11 servo) → PCA9685 (I2C)
 ```
 
 Capture audio non-blocking: callback mic hanya menyalin blok ke antrian, sementara VAD dan inferensi dikerjakan di luar callback. Selama VAD bilang masih ada ucapan, tiap 0.3 detik model menilai 1.5 detik audio terakhir — jadi pose diperbarui selagi orang bicara, bukan menunggu kalimat selesai. Kalau inferensi tertinggal, jendela lama **dibuang** dan hanya yang terbaru dipakai.
@@ -41,10 +41,10 @@ Capture audio non-blocking: callback mic hanya menyalin blok ke antrian, sementa
 | `model_emosi.py` | `PengenalEmosi` (wav2vec2 HuggingFace) + peta label → ekspresi |
 | `pose.py` | Tabel pose (7 gerakan → 11 servo) + blend skor → pose |
 | `pengendali.py` | `PengendaliEkspresi`: model → skor → pose → servo |
-| `servo.py` | `PengirimServo`: UART ke ESP32 (tanpa `--port` = cetak pose ke terminal) |
+| `servo.py` | `PengirimServo`: I2C ke PCA9685 (tanpa `--i2c-bus` = cetak pose ke terminal) |
 | `konfigurasi.py` | Konstanta bersama (sample rate, ambang, jendela, dst.) |
 
-Hanya lima class, masing-masing menyimpan state: `PenangkapAudio` (stream mic), `SegmenterVAD` (buffer ucapan), `PengenalEmosi` (model), `PengendaliEkspresi` (EMA dan pose terakhir), dan `PengirimServo` (port serial). Selebihnya fungsi biasa. Servo dikirim langsung dari thread inferensi, tanpa thread tambahan.
+Hanya lima class, masing-masing menyimpan state: `PenangkapAudio` (stream mic), `SegmenterVAD` (buffer ucapan), `PengenalEmosi` (model), `PengendaliEkspresi` (EMA dan pose terakhir), dan `PengirimServo` (bus I2C). Selebihnya fungsi biasa. Servo dikirim langsung dari thread inferensi, tanpa thread tambahan.
 
 ## Install
 
@@ -62,13 +62,28 @@ Di Linux, `sounddevice` butuh PortAudio:
 sudo apt install libportaudio2
 ```
 
+**Raspberry Pi (Raspberry Pi OS / Debian 12+):** `pip` global diblokir, jadi venv di atas wajib. Aktifkan I2C dan beri izin akses:
+
+```bash
+sudo raspi-config nonint do_i2c 0        # atau: raspi-config -> Interface Options -> I2C
+sudo usermod -aG i2c,audio $USER         # lalu logout/login
+sudo apt install -y i2c-tools
+```
+
+Pi dengan RAM ~1 GB sebaiknya diberi swap 1 GB (model + PyTorch memakan ±600 MB):
+
+```bash
+sudo dphys-swapfile swapoff
+sudo sed -i 's/^CONF_SWAPSIZE=.*/CONF_SWAPSIZE=1024/' /etc/dphys-swapfile
+sudo dphys-swapfile setup && sudo dphys-swapfile swapon
+```
+
 Jalan pertama kali butuh koneksi internet untuk mengunduh model (~360 MB, disimpan di cache HuggingFace `~/.cache/huggingface`). Setelah itu bisa offline — kalau HuggingFace tidak bisa dihubungi, program otomatis jatuh ke cache lokal.
 
 ## Jalankan
 
 ```bash
-python main.py --list-ports                          # cari port ESP32
-python main.py --port /dev/cu.usbserial-0001         # kirim pose ke servo (Windows: --port COM5)
+python main.py --i2c-bus 1                           # Raspberry Pi: gerakkan servo via PCA9685
 python main.py                                       # tanpa servo: cetak pose ke terminal
 ```
 
@@ -76,9 +91,7 @@ Opsi:
 
 | Opsi | Fungsi |
 | --- | --- |
-| `--port P` | Port serial ESP32. Kosong = hanya cetak pose |
-| `--baud 115200` | Baud rate UART (samakan dengan `Serial.begin` di ESP32) |
-| `--list-ports` | Tampilkan port serial lalu keluar |
+| `--i2c-bus N` | Nomor bus I2C (`1` = `/dev/i2c-1`, pin GPIO2/GPIO3). Kosong = hanya cetak pose |
 | `--list-devices` | Tampilkan semua device audio beserta index-nya |
 | `--device N` | Pilih mic tertentu berdasarkan index |
 | `--rms` | Mode uji: cetak level mic saja, tanpa VAD/model/servo |
@@ -120,35 +133,36 @@ Pose dihitung dalam **7 gerakan**, lalu dibagikan ke **11 servo** (kiri dan kana
 
 Tabel pose per-ekspresi ada di `pose.py` (`POSE_PENUH`), disusun mengikuti kombinasi Action Unit **FACS** — itu titik awal yang wajar, silakan tuning ke karakter mekanikmu. Nilai `mata y` dan `sudut mata` per ekspresi (kaget mendongak, sedih menunduk, marah miring tajam) adalah **tebakan**, bukan hasil pengukuran; `mata x` sengaja 0 untuk semua ekspresi. Bobot koreksi per ekspresi (mis. `sedih` ×1.8 karena model cenderung menaruh bicara pelan di netral) ada di `pengendali.py` (`BOBOT_EKSPRESI`); itu juga heuristik.
 
-## Protokol UART ke ESP32
-
-ESP32 tidak mengolah data. PC mengirim perintah I2C yang sudah jadi, dibungkus bingkai biner (115200 baud 8N1):
+## Pemasangan Hardware (Raspberry Pi)
 
 ```
-[N] [alamat I2C] [byte data ...]        N = jumlah byte yang menyusul (alamat + data)
+Pi pin 1  (3V3)   → PCA9685 VCC      (daya logika chip, BUKAN daya servo)
+Pi pin 3  (SDA)   → PCA9685 SDA
+Pi pin 5  (SCL)   → PCA9685 SCL
+Pi pin 6  (GND)   → PCA9685 GND      (ground harus bersama dengan catu servo)
+Catu 5–6 V eksternal → terminal V+ PCA9685 (daya servo)
 ```
 
-**Firmware ESP32, seluruhnya:**
+> **Jangan menyuplai servo dari pin 5V Pi.** 11 servo bisa menarik beberapa ampere saat bergerak bersamaan dan akan mereset (atau merusak) Pi. Pakai catu eksternal, dan sambungkan GND-nya ke GND Pi.
 
-1. baca 1 byte → `N`
-2. baca `N` byte berikutnya ke buffer
-3. `Wire.beginTransmission(buffer[0]); Wire.write(buffer + 1, N - 1); Wire.endTransmission();`
-4. ulangi
+Cek PCA9685 terlihat di bus sebelum menjalankan program:
 
-Tidak perlu tahu apa itu PCA9685, servo, atau pose. Tidak ada balasan ke PC. Pastikan buffer cukup (bingkai terpanjang 47 byte; `Wire` ESP32 umumnya 128 byte; cek di versi core Anda) dan `Wire.begin()` serta `Serial.begin(115200)` dipanggil.
+```bash
+i2cdetect -y 1        # harus ada "40" (dan "70" = all-call, normal)
+```
 
-**Yang dikirim PC** (semuanya di [servo.py](servo.py)):
+Yang ditulis program ke PCA9685 (semuanya di [servo.py](servo.py)):
 
-- Sekali tiap port tersambung: 4 bingkai inisialisasi PCA9685 (tidur, `PRESCALE` = 121 untuk 50 Hz, mode keluaran, bangun + auto-increment).
-- Tiap kali pose berubah: satu bingkai 47 byte yang menulis 11 channel PCA9685 sekaligus (4 byte per channel: `ON_L, ON_H, OFF_L, OFF_H`). Tidak ada pengulangan kalau pose tetap.
-- Saat program ditutup (Ctrl+C): bingkai pose netral.
+- Sekali saat start: inisialisasi (tidur, `PRESCALE` = 121 untuk 50 Hz, mode keluaran, bangun + auto-increment). Kalau PCA9685 tidak menjawab, program berhenti di awal dengan pesan yang jelas.
+- Tiap kali pose berubah: satu transaksi I2C yang menulis 11 channel sekaligus (4 byte per channel: `ON_L, ON_H, OFF_L, OFF_H`). Tidak ada pengulangan kalau pose tetap.
+- Saat program ditutup (Ctrl+C): pose netral.
 - Servo ke-n dipasang di channel PCA9685 ke-(n-1), sesuai tabel di atas. Alamat I2C default `0x40`.
 
 **Kalibrasi servo** ada di `KALIBRASI` di [servo.py](servo.py): untuk tiap servo, tick PWM pada nilai terendah dan tertinggi. Isi awalnya 205–410 tick (≈1,0–2,0 ms), aman untuk servo hobi umum tapi **belum dituning ke mekanikmu**. Sempitkan kalau servo menabrak batas mekanik, dan **tukar kedua angka** kalau servo terpasang berlawanan arah (mis. servo sisi kanan).
 
-- Pose berubah langsung tanpa interpolasi, dikirim tiap ~0,3 dtk selama ada ucapan. Karena ESP32 tidak mengolah apa pun, gerak servo mengikuti kecepatan servonya sendiri; bila ingin lebih halus, perkecil `--hop` atau tambahkan penghalusan di PC.
-- Membuka port me-reset ESP32, jadi program menunggu ±2 dtk sebelum mengirim. Kalau kabel tercabut, program menyambung ulang otomatis tiap 2 dtk dan menginisialisasi ulang PCA9685.
-- Tanpa `--port`, yang dicetak adalah 7 gerakan, bukan bingkai UART.
+- Pose berubah langsung tanpa interpolasi, dikirim tiap ~0,3 dtk selama ada ucapan. Gerak servo mengikuti kecepatan servonya sendiri; bila ingin lebih halus, perkecil `--hop` atau tambahkan penghalusan.
+- Kalau PCA9685 berhenti menjawab (kabel lepas / catu mati), program memberi peringatan sekali, lalu mencoba lagi tiap 2 dtk dan menginisialisasi ulang PCA9685 begitu pulih.
+- Tanpa `--i2c-bus`, yang dicetak adalah 7 gerakan, bukan transaksi I2C.
 
 ## Model
 
@@ -197,9 +211,21 @@ Index device di sisi input adalah angka di kolom paling kiri. Di macOS, pastikan
 
 VAD terlalu ketat untuk mic Anda. Turunkan ambangnya dengan `--vad-threshold 0.3`. Sebaliknya, kalau "speech detected" muncul terus padahal sunyi (mic berisik), naikkan ke `0.6`–`0.7`.
 
-**Servo tidak bergerak / `Gagal membuka port servo`**
+**`/dev/i2c-1 tidak ada`**
 
-Cek `python main.py --list-ports` dan pastikan port benar, kabel USB data (bukan kabel charge-only), dan tidak ada aplikasi lain (Serial Monitor Arduino IDE) yang memegang port. Tanpa `--port`, pose hanya dicetak; kalau baris pose tercetak tapi servo diam, masalahnya di firmware ESP32/PCA9685.
+I2C belum aktif: `sudo raspi-config nonint do_i2c 0`, lalu reboot.
+
+**`Tidak boleh membuka /dev/i2c-1`**
+
+User belum masuk grup `i2c`: `sudo usermod -aG i2c $USER`, lalu logout/login.
+
+**`PCA9685 (0x40) tidak menjawab`**
+
+Jalankan `i2cdetect -y 1`. Kalau `40` tidak muncul: cek SDA/SCL tidak tertukar, GND bersama, VCC 3,3 V terpasang, dan alamat board tidak diubah lewat jumper (kalau muncul di alamat lain, ubah `ALAMAT_PCA` di `servo.py`).
+
+**Pose tercetak/log normal tapi servo diam**
+
+Hampir selalu catu servo: terminal V+ PCA9685 harus dapat 5–6 V dari catu eksternal. Daya logika dari Pi (VCC) saja tidak cukup menggerakkan servo.
 
 **Terasa kurang responsif**
 
@@ -223,4 +249,4 @@ Device sedang dipakai aplikasi lain (Zoom, Meet, perekam), atau index device sal
 
 **Inferensi lambat**
 
-Default CPU-only. GPU dipakai otomatis kalau `torch.cuda.is_available()` bernilai true — tidak wajib, dan tidak perlu konfigurasi apa pun.
+Pi tidak punya GPU, jadi semua jalan di CPU. Kalau tebakan tertinggal, longgarkan: `--hop 0.6`. Default CPU-only. GPU dipakai otomatis kalau `torch.cuda.is_available()` bernilai true — tidak wajib, dan tidak perlu konfigurasi apa pun.

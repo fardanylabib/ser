@@ -1,10 +1,10 @@
-"""SER Terminal — dengar ucapan dari mic, gerakkan servo wajah (ESP32 + PCA9685).
+"""SER Terminal — dengar ucapan dari mic, gerakkan servo wajah (Raspberry Pi + PCA9685).
 
 Emosi ucapan dideteksi wav2vec2 SER, diterjemahkan ke 5 ekspresi (senyum, netral,
-sedih, marah, kaget), lalu jadi pose 11 servo yang dikirim ke ESP32 lewat USB-serial:
+sedih, marah, kaget), lalu jadi pose 11 servo yang ditulis langsung ke PCA9685 lewat I2C:
 
     mic -> VAD -> wav2vec2 -> skor ekspresi -> pose 11 servo
-        --USB/UART--> ESP32 --I2C--> PCA9685 --> servo
+        --I2C (GPIO2/GPIO3)--> PCA9685 --> servo
 
 File ini hanya perakit (CLI + menyambung objek). Logikanya ada di:
     pipeline.py     jalankan(): mic -> resample -> VAD -> thread inferensi
@@ -13,14 +13,12 @@ File ini hanya perakit (CLI + menyambung objek). Logikanya ada di:
     model_emosi.py  PengenalEmosi (wav2vec2 HuggingFace) + peta label -> ekspresi
     pose.py         tabel pose (7 gerakan -> 11 servo) + blend skor -> pose
     pengendali.py   PengendaliEkspresi (model -> pose -> servo)
-    servo.py        PengirimServo (UART ke ESP32; tanpa port = cetak ke terminal)
+    servo.py        PengirimServo (I2C ke PCA9685; tanpa --i2c-bus = cetak ke terminal)
 
-Tanpa `--port`, pose dicetak ke terminal (uji tanpa hardware).
+Tanpa `--i2c-bus`, pose dicetak ke terminal (uji tanpa hardware).
 
 Jalankan:
-    python main.py --list-ports
-    python main.py --port /dev/cu.usbserial-0001           # macOS/Linux
-    python main.py --port COM5                              # Windows
+    python main.py --i2c-bus 1                              # Raspberry Pi: gerakkan servo
     python main.py                                          # cetak pose saja
     python main.py --list-devices                           # daftar mic
     python main.py --device 2 --rms                         # uji level mic saja
@@ -36,19 +34,22 @@ from typing import Optional
 from konfigurasi import CONF_THRESHOLD, HOP_SEC, MODEL_ID, SMOOTH_ALPHA, WINDOW_SEC
 from pengendali import PengendaliEkspresi
 from pipeline import jalankan, uji_rms
-from servo import BAUD_DEFAULT, PengirimServo
+from servo import ALAMAT_PCA, PengirimServo
 
 log = logging.getLogger("ser")
 
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
-        description="Deteksi emosi ucapan dari mic, gerakkan servo wajah lewat ESP32."
+        description="Deteksi emosi ucapan dari mic, gerakkan servo wajah lewat PCA9685 (I2C)."
     )
-    servo = p.add_argument_group("servo (ESP32)")
-    servo.add_argument("--port", default=None, help="Port serial ESP32; kosong = cetak pose saja.")
-    servo.add_argument("--baud", type=int, default=BAUD_DEFAULT, help=f"Baud rate (default {BAUD_DEFAULT}).")
-    servo.add_argument("--list-ports", action="store_true", help="Tampilkan port serial lalu keluar.")
+    servo = p.add_argument_group("servo (PCA9685 via I2C)")
+    servo.add_argument(
+        "--i2c-bus",
+        type=int,
+        default=None,
+        help="Nomor bus I2C (1 = /dev/i2c-1, pin GPIO2/GPIO3 di Pi); kosong = cetak pose saja.",
+    )
 
     p.add_argument("--device", type=int, default=None, help="Index device input mic.")
     p.add_argument("--list-devices", action="store_true", help="Tampilkan device audio.")
@@ -99,17 +100,6 @@ def daftar_device() -> int:
     return 0
 
 
-def daftar_port() -> int:
-    try:
-        from serial.tools import list_ports
-    except ImportError:
-        log.error("pyserial belum terpasang: pip install pyserial")
-        return 1
-    for info in list_ports.comports():
-        print(f"{info.device}\t{info.description}")
-    return 0
-
-
 def main(argv: Optional[list[str]] = None) -> int:
     args = parse_args(argv)
     logging.basicConfig(
@@ -120,20 +110,27 @@ def main(argv: Optional[list[str]] = None) -> int:
 
     if args.list_devices:
         return daftar_device()
-    if args.list_ports:
-        return daftar_port()
 
     if args.rms:  # uji mic saja, servo tidak disentuh
         return uji_rms(args)
 
-    servo = PengirimServo(args.port, args.baud)  # port kosong = cetak pose saja
+    servo = PengirimServo(args.i2c_bus)  # bus kosong = cetak pose saja
     try:
         servo.buka()
     except ImportError:
-        log.error("pyserial belum terpasang: pip install pyserial")
+        log.error("smbus2 belum terpasang: pip install smbus2")
         return 1
-    except Exception as exc:
-        log.error("Gagal membuka port servo %s: %s (cek --list-ports)", args.port, exc)
+    except FileNotFoundError:
+        log.error("/dev/i2c-%d tidak ada: aktifkan I2C (sudo raspi-config -> Interface Options -> I2C) lalu reboot.", args.i2c_bus)
+        return 1
+    except PermissionError:
+        log.error("Tidak boleh membuka /dev/i2c-%d: sudo usermod -aG i2c $USER, lalu login ulang.", args.i2c_bus)
+        return 1
+    except OSError as exc:
+        log.error(
+            "PCA9685 (0x%02X) tidak menjawab di bus %d: %s. Cek kabel SDA/SCL/GND/VCC dan jalankan: i2cdetect -y %d",
+            ALAMAT_PCA, args.i2c_bus, exc, args.i2c_bus,
+        )
         return 1
 
     try:

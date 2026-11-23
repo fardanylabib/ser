@@ -1,29 +1,10 @@
-"""Pengirim pose ke servo: PC -> ESP32 (UART) -> PCA9685 (I2C).
+"""Pengirim pose ke servo: Raspberry Pi -> PCA9685 lewat I2C (tanpa perantara).
 
-    PC --USB/UART--> ESP32 --I2C--> PCA9685 --> servo
+    Raspberry Pi --I2C (GPIO2 SDA, GPIO3 SCL)--> PCA9685 --> servo
 
-ESP32 hanyalah JEMBATAN: ia tidak mengolah data sedikit pun. Semua yang perlu
-diketahui tentang PCA9685 (alamat, register, inisialisasi, 50 Hz, kalibrasi servo)
-ada di file ini, di sisi PC. PC mengirim perintah I2C yang sudah jadi, ESP32
-meneruskannya apa adanya.
-
-Bingkai UART (biner, 115200 baud 8N1):
-
-    [N] [byte 1] [byte 2] ... [byte N]
-
-    N        1 byte: jumlah byte yang menyusul (1..255)
-    byte 1   alamat I2C tujuan (PCA9685 = 0x40)
-    byte 2.. isi yang ditulis ke alamat itu (byte pertamanya nomor register)
-
-Tugas firmware ESP32, seluruhnya:
-
-    1. baca 1 byte -> N
-    2. baca N byte berikutnya ke buffer
-    3. Wire.beginTransmission(buffer[0]); Wire.write(buffer + 1, N - 1); Wire.endTransmission();
-    4. ulangi
-
-Tanpa parsing teks, tanpa tabel, tanpa konversi, tanpa inisialisasi PCA9685.
-ESP32 tidak perlu membalas apa pun.
+Pi menulis register PCA9685 langsung lewat `/dev/i2c-N` (library `smbus2`).
+Semua yang perlu diketahui tentang PCA9685 (alamat, register, inisialisasi,
+50 Hz, kalibrasi servo) ada di file ini.
 
 Servo ke-n (urutan `pose.SERVO`) dipasang di channel PCA9685 ke-(n-1).
 """
@@ -38,14 +19,8 @@ import pose
 
 log = logging.getLogger("ser.servo")
 
-BAUD_DEFAULT = 115200
-"""Baud rate UART (samakan dengan `Serial.begin(...)` di ESP32)."""
-
-BOOT_ESP32_SEC = 2.0
-"""Jeda setelah port dibuka: membuka port me-reset ESP32 (DTR/RTS), tunggu boot."""
-
 RECONNECT_SEC = 2.0
-"""Selang percobaan buka ulang port kalau kabel USB sempat tercabut."""
+"""Selang percobaan ulang kalau PCA9685 tidak menjawab (kabel lepas / catu mati)."""
 
 # --- PCA9685 ---------------------------------------------------------------- #
 
@@ -93,64 +68,71 @@ def ke_tick(p: dict[str, float]) -> tuple[int, ...]:
     return tuple(hasil)
 
 
-def bingkai_i2c(*isi: int) -> bytes:
-    """Bungkus satu penulisan I2C ke PCA9685 jadi bingkai UART: [N][alamat][isi...]."""
-    badan = bytes([ALAMAT_PCA, *isi])
-    return bytes([len(badan)]) + badan
-
-
-def bingkai_pose(tick: tuple[int, ...]) -> bytes:
-    """Satu penulisan beruntun ke register LED0..: tiap channel 4 byte (ON_L, ON_H, OFF_L, OFF_H)."""
-    isi = [REG_LED0_ON_L]
+def data_pose(tick: tuple[int, ...]) -> list[int]:
+    """Isi tulis beruntun ke register LED0..: tiap channel 4 byte (ON_L, ON_H, OFF_L, OFF_H)."""
+    isi: list[int] = []
     for t in tick:
         isi += [0, 0, t & 0xFF, t >> 8]  # ON di tick 0, OFF di tick `t` -> lebar pulsa = t
-    return bingkai_i2c(*isi)
-
-
-BINGKAI_INIT = (
-    bingkai_i2c(REG_MODE1, 0x10),  # tidur (PRESCALE hanya bisa diubah saat tidur)
-    bingkai_i2c(REG_PRESCALE, PRESCALE),  # 50 Hz
-    bingkai_i2c(REG_MODE2, 0x04),  # keluaran totem-pole
-    bingkai_i2c(REG_MODE1, 0x20),  # bangun + auto-increment register
-)
-"""Urutan inisialisasi PCA9685, dikirim sekali tiap kali port tersambung."""
+    return isi
 
 
 class PengirimServo:
-    """Kirim pose ke PCA9685 lewat ESP32.
+    """Kirim pose ke PCA9685 lewat I2C Raspberry Pi.
 
     `kirim` dipanggil berkala oleh thread inferensi (tiap ~0,2 dtk), jadi tidak
-    perlu thread sendiri: ia menulis hanya kalau pose berubah. Kalau kabel
-    tercabut, port dibuka ulang (dan PCA9685 diinisialisasi ulang) di panggilan
-    berikutnya.
+    perlu thread sendiri: ia menulis hanya kalau pose berubah. Kalau PCA9685
+    berhenti menjawab, penulisan dicoba lagi (dan PCA9685 diinisialisasi ulang)
+    tiap RECONNECT_SEC.
 
-    Kalau `port` kosong (None), tidak ada servo: pose hanya dicetak ke terminal
+    Kalau `bus` kosong (None), tidak ada servo: pose hanya dicetak ke terminal
     tiap kali berubah (uji tanpa hardware).
     """
 
-    def __init__(self, port: Optional[str] = None, baud: int = BAUD_DEFAULT) -> None:
-        self.port, self.baud = port, baud
-        self._ser: Any = None
+    def __init__(self, bus: Optional[int] = None) -> None:
+        self.bus = bus  # nomor bus I2C: 1 -> /dev/i2c-1 (pin GPIO2/GPIO3 di Pi)
+        self._smbus: Any = None
+        self._i2c_msg: Any = None  # modul smbus2.i2c_msg (diimpor di buka())
         self._terkirim: Optional[tuple[int, ...]] = None  # tick terakhir yang ditulis
-        self._perlu_init = False  # PCA9685 belum diinisialisasi sejak port dibuka
-        self._siap = 0.0  # baru boleh menulis setelah waktu ini (tunggu ESP32 boot)
-        self._coba_lagi = 0.0  # baru boleh menyambung ulang setelah waktu ini
+        self._siap = False  # PCA9685 sudah diinisialisasi dan menjawab
+        self._putus = False  # sedang dalam kondisi gagal (agar peringatan tidak berulang)
+        self._coba_lagi = 0.0  # baru boleh mencoba ulang setelah waktu ini
         self._terakhir_cetak: Optional[str] = None  # mode cetak: baris terakhir
 
     def buka(self) -> None:
-        """Buka port; lempar exception kalau gagal (agar program berhenti di awal)."""
-        if self.port is None:  # mode cetak
-            return
-        import serial  # pyserial; diimpor di sini agar mode tanpa servo tidak butuh
+        """Buka bus I2C dan inisialisasi PCA9685; lempar exception kalau gagal.
 
-        self._ser = serial.Serial(self.port, self.baud, timeout=0, write_timeout=0.5)
-        self._terkirim = None
-        self._perlu_init = True
-        self._siap = time.monotonic() + BOOT_ESP32_SEC
-        log.info("Servo: terhubung ke %s @ %d baud", self.port, self.baud)
+        Dibuat gagal-cepat agar salah kabel / I2C belum aktif ketahuan di awal,
+        bukan baru saat ucapan pertama.
+        """
+        if self.bus is None:  # mode cetak
+            return
+        from smbus2 import SMBus, i2c_msg  # diimpor di sini agar mode cetak tidak butuh
+
+        self._i2c_msg = i2c_msg
+        self._smbus = SMBus(self.bus)
+        try:
+            self._init_pca()
+        except Exception:
+            self._lepas()
+            raise
+        log.info("Servo: PCA9685 0x%02X terhubung di /dev/i2c-%d", ALAMAT_PCA, self.bus)
+
+    def _tulis(self, reg: int, data: list[int]) -> None:
+        """Satu transaksi I2C: [register][data...] ke PCA9685 (tanpa batas 32 byte SMBus)."""
+        self._smbus.i2c_rdwr(self._i2c_msg.write(ALAMAT_PCA, [reg, *data]))
+
+    def _init_pca(self) -> None:
+        """Urutan inisialisasi PCA9685; dipanggil tiap kali (re)connect."""
+        self._tulis(REG_MODE1, [0x10])  # tidur (PRESCALE hanya bisa diubah saat tidur)
+        self._tulis(REG_PRESCALE, [PRESCALE])  # 50 Hz
+        self._tulis(REG_MODE2, [0x04])  # keluaran totem-pole
+        self._tulis(REG_MODE1, [0x20])  # bangun + auto-increment register
+        time.sleep(0.01)  # osilator PCA9685 butuh waktu setelah bangun
+        self._siap = True
+        self._terkirim = None  # PCA9685 baru di-reset -> pose harus ditulis ulang
 
     def kirim(self, p: dict[str, float]) -> None:
-        if self.port is None:  # mode cetak: hanya kalau pose berubah
+        if self.bus is None:  # mode cetak: hanya kalau pose berubah
             baris = pose.format_pose(p)
             if baris != self._terakhir_cetak:
                 self._terakhir_cetak = baris
@@ -159,46 +141,37 @@ class PengirimServo:
 
         tick = ke_tick(p)
         sekarang = time.monotonic()
-
-        if self._ser is None:  # port lepas: coba sambung lagi tiap RECONNECT_SEC
-            if sekarang < self._coba_lagi:
-                return
-            try:
-                self.buka()
-            except Exception as exc:
-                self._coba_lagi = sekarang + RECONNECT_SEC
-                log.debug("Servo: gagal membuka %s: %s", self.port, exc)
-                return
-
-        if sekarang < self._siap:
-            return  # ESP32 masih boot; pose dicoba lagi di panggilan berikutnya
+        if sekarang < self._coba_lagi:
+            return
         try:
-            if self._perlu_init:
-                for bingkai in BINGKAI_INIT:
-                    self._ser.write(bingkai)
-                time.sleep(0.01)  # osilator PCA9685 butuh waktu setelah bangun
-                self._perlu_init = False
+            if not self._siap:
+                self._init_pca()
+                log.info("Servo: PCA9685 menjawab lagi")
+                self._putus = False
             if tick != self._terkirim:
-                self._ser.write(bingkai_pose(tick))
+                self._tulis(REG_LED0_ON_L, data_pose(tick))
                 self._terkirim = tick
-        except Exception as exc:  # kabel dicabut / ESP32 hilang
-            log.warning("Servo: koneksi terputus (%s); mencoba menyambung ulang", exc)
-            self._lepas()
+        except OSError as exc:  # PCA9685 tidak menjawab: kabel lepas / catu mati
+            if not self._putus:
+                log.warning("Servo: PCA9685 tidak menjawab (%s); mencoba lagi tiap %.0f dtk", exc, RECONNECT_SEC)
+                self._putus = True
+            self._siap = False
             self._coba_lagi = sekarang + RECONNECT_SEC
 
     def tutup(self) -> None:
-        """Kembalikan semua servo ke netral lalu tutup port."""
-        if self._ser is not None and not self._perlu_init:
+        """Kembalikan semua servo ke netral lalu tutup bus."""
+        if self._smbus is not None and self._siap:
             try:
-                self._ser.write(bingkai_pose(ke_tick(pose.NETRAL)))
-            except Exception:
+                self._tulis(REG_LED0_ON_L, data_pose(ke_tick(pose.NETRAL)))
+            except OSError:
                 pass
         self._lepas()
 
     def _lepas(self) -> None:
         try:
-            if self._ser is not None:
-                self._ser.close()
+            if self._smbus is not None:
+                self._smbus.close()
         except Exception:
             pass
-        self._ser = None
+        self._smbus = None
+        self._siap = False
