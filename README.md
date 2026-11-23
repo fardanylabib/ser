@@ -1,16 +1,12 @@
 # SER Terminal
 
-Dengarkan ucapan dari mic, log **ekspresi wajah** untuk robot mekanis — langsung di terminal. Emosi ucapan dideteksi dengan *Speech Emotion Recognition*, lalu diterjemahkan ke 5 ekspresi wajah yang masing-masing nantinya jadi satu preset pose servo. Program ini hanya me-log ekspresi; terjemahan ke gerakan aktuator dikerjakan terpisah.
-
-Ekspresi diperbarui **selama orang masih bicara**, bukan menunggu kalimat selesai. Baris terakhir ditimpa di tempat tiap 0.3 detik; tiap kali ekspresi berganti (atau frasa berhenti), baris itu dikunci sebagai riwayat:
+Dengarkan ucapan dari mic, lalu gerakkan **servo wajah** robot sesuai emosinya. Emosi ucapan dideteksi dengan *Speech Emotion Recognition*, diterjemahkan ke 5 ekspresi (senyum, netral, sedih, marah, kaget), lalu jadi pose 4 derajat kebebasan yang dikirim ke ESP32 lewat USB-serial. Tidak ada GUI; tanpa servo, pose dicetak ke terminal.
 
 ```
-[listening...]  (Ctrl+C untuk berhenti)
-🎙  speech detected
-😐  netral   (conf 0.95)     ← baris ini terus berubah sementara orang bicara
-🎙  speech detected
-🙁  sedih    (conf 0.90)
+PC (mic → VAD → wav2vec2 → pose) --USB/UART--> ESP32 --I2C--> PCA9685 --> servo
 ```
+
+Kode ESP32 → PCA9685 dibuat sendiri; program ini hanya mengirim teks lewat UART (protokolnya di bawah).
 
 ## Cara Kerja
 
@@ -25,18 +21,30 @@ mic → callback sounddevice → antrian audio
                               │
                      antrian → thread inferensi
                               │
-                     wav2vec2 SER → probabilitas 7 label emosi
+                     wav2vec2 SER → probabilitas label emosi
                               │
-                     agregasi label → skor 5 ekspresi wajah
+                     agregasi label → skor 5 ekspresi (+ EMA)
                               │
-                     EMA + histeresis → print ekspresi ke terminal
+                     blend pose 4-DOF → ESP32 (UART)
 ```
 
-Capture audio bersifat non-blocking: callback mic hanya menyalin blok ke antrian, sementara VAD dan inferensi model dikerjakan di luar callback.
+Capture audio non-blocking: callback mic hanya menyalin blok ke antrian, sementara VAD dan inferensi dikerjakan di luar callback. Selama VAD bilang masih ada ucapan, tiap 0.3 detik model menilai 1.5 detik audio terakhir — jadi pose diperbarui selagi orang bicara, bukan menunggu kalimat selesai. Kalau inferensi tertinggal, jendela lama **dibuang** dan hanya yang terbaru dipakai.
 
-**Jendela geser, bukan tunggu-selesai.** Selama VAD bilang masih ada ucapan, tiap 0.3 detik model menilai 1.5 detik audio terakhir. Jadi satu frasa 4 detik menghasilkan belasan tebakan berturut-turut, bukan satu tebakan di akhir. Buffer-nya dipangkas sepanjang jendela, jadi pemakaian memori tetap datar berapa lama pun Anda bicara.
+## Struktur Kode
 
-Kalau inferensi sempat tertinggal dari suara, jendela lama **dibuang** dan hanya yang terbaru dipakai — output lebih baik melompat daripada tertinggal makin jauh di belakang.
+| File | Isi |
+| --- | --- |
+| `main.py` | Perakit: baca opsi CLI, pilih tujuan pose, jalankan pipeline |
+| `pipeline.py` | `jalankan()`: mic → resample → VAD → thread inferensi; `uji_rms()` untuk tes mic |
+| `audio.py` | `PenangkapAudio` (sounddevice, non-blocking) + resampler |
+| `vad.py` | `SegmenterVAD`: Silero VAD → jendela ucapan |
+| `model_emosi.py` | `PengenalEmosi` (wav2vec2 HuggingFace) + peta label → ekspresi |
+| `pose.py` | Tabel pose 4-DOF + blend skor → pose |
+| `pengendali.py` | `PengendaliEkspresi`: model → skor → pose → servo |
+| `servo.py` | `PengirimServo`: UART ke ESP32 (tanpa `--port` = cetak pose ke terminal) |
+| `konfigurasi.py` | Konstanta bersama (sample rate, ambang, jendela, dst.) |
+
+Hanya lima class, masing-masing menyimpan state: `PenangkapAudio` (stream mic), `SegmenterVAD` (buffer ucapan), `PengenalEmosi` (model), `PengendaliEkspresi` (EMA dan pose terakhir), dan `PengirimServo` (port serial). Selebihnya fungsi biasa. Servo dikirim langsung dari thread inferensi, tanpa thread tambahan.
 
 ## Install
 
@@ -59,56 +67,44 @@ Jalan pertama kali butuh koneksi internet untuk mengunduh model (~360 MB, disimp
 ## Jalankan
 
 ```bash
-python main.py
+python main.py --list-ports                          # cari port ESP32
+python main.py --port /dev/cu.usbserial-0001         # kirim pose ke servo (Windows: --port COM5)
+python main.py                                       # tanpa servo: cetak pose ke terminal
 ```
 
 Opsi:
 
 | Opsi | Fungsi |
 | --- | --- |
+| `--port P` | Port serial ESP32. Kosong = hanya cetak pose |
+| `--baud 115200` | Baud rate UART (samakan dengan `Serial.begin` di ESP32) |
+| `--list-ports` | Tampilkan port serial lalu keluar |
 | `--list-devices` | Tampilkan semua device audio beserta index-nya |
 | `--device N` | Pilih mic tertentu berdasarkan index |
-| `--rms` | Mode uji: cetak level mic saja, tanpa VAD/model |
-| `--threshold 0.4` | Skor minimal agar ekspresi boleh dipasang/diganti; di bawahnya wajah bertahan |
+| `--rms` | Mode uji: cetak level mic saja, tanpa VAD/model/servo |
+| `--threshold 0.4` | Ambang bawah gerbang keyakinan; di bawahnya pose memudar ke netral |
 | `--vad-threshold 0.5` | Sensitivitas VAD (kecil = lebih sensitif) |
 | `--hop 0.3` | Jarak antar-tebakan, detik. Kecil = lebih responsif, lebih berat |
 | `--window 1.5` | Panjang audio yang dinilai tiap tebakan, detik |
-| `--smooth 0.4` | Bobot tebakan baru, 0–1. `1.0` = tanpa smoothing (paling gesit tapi berkedip) |
+| `--smooth 0.4` | Bobot tebakan baru, 0–1. `1.0` = tanpa smoothing (paling gesit tapi goyah) |
 | `--model ID` | Ganti model SER dari HuggingFace |
-| `--verbose` | Log detail |
+| `--verbose` | Log detail (skor ekspresi dan pose tiap jendela) |
 
-## Ekspresi Wajah
+## Ekspresi dan Pose
 
-Lima ekspresi, masing-masing calon satu preset pose servo. Label emosi model yang mirip **digabung** ke ekspresi yang sama — probabilitasnya dijumlahkan, jadi keraguan model antara mis. `fearful` dan `surprised` tidak menggoyang wajah:
+Lima ekspresi. Label emosi model yang mirip **digabung** ke ekspresi yang sama — probabilitasnya dijumlahkan, jadi keraguan model antara mis. `fearful` dan `surprised` tidak menggoyang wajah:
 
 | Ekspresi | Label emosi yang menyumbang |
 | --- | --- |
-| 🙂 senyum | `happy` |
-| 😐 netral | `calm`, `neutral` |
-| 🙁 sedih | `sad` |
-| 😠 marah | `angry`, `disgust` |
-| 😲 kaget | `fearful`, `surprised` |
+| senyum | `happy` |
+| netral | `calm`, `neutral` |
+| sedih | `sad` |
+| marah | `angry`, `disgust` |
+| kaget | `fearful`, `surprised` |
 
-Dua aturan penting untuk wajah robot:
+Label yang tidak dikenal (model custom) otomatis dipetakan ke netral dengan peringatan di log, jadi ganti model tidak membuat program crash.
 
-- **Histeresis.** Ekspresi berganti hanya kalau pemenang baru menang telak (skor ≥ 0.6) atau menang dua jendela berturut-turut (~0.6 dtk). Terukur pada rekaman uji 15 detik: label emosi mentah berganti 5×, ekspresi hanya 2× — dan keduanya pergantian yang sungguhan, bukan kedip.
-- **Wajah bertahan saat hening.** Saat orang berhenti bicara, ekspresi terakhir tetap "terpasang" — tidak di-reset ke netral. Kapan robot kembali ke pose istirahat adalah keputusan di sisi penggerak servo, bukan di sini.
-
-Label yang tidak dikenal (model custom) otomatis dipetakan ke netral dengan peringatan di log, jadi ganti model tidak pernah membuat program crash.
-
-## main2.py — Output Derajat Pose (untuk servo)
-
-Pipeline sama, tapi langkah terakhirnya berbeda: alih-alih memilih satu ekspresi pemenang, `main2.py` **mem-blend pose**. Tiap ekspresi punya pose penuh dalam 4 derajat kebebasan, dan pose akhir = jumlah pose berbobot skor model, dikali gerbang keyakinan (`pose = gate × Σ skor × pose_penuh`). Ragu antara dua ekspresi = wajah campuran; makin yakin = amplitudo makin penuh; bingung total = netral.
-
-```bash
-python main2.py
-```
-
-Satu baris per jendela (~tiap 0.3 dtk selama ada ucapan) ke stdout:
-
-```
-buka mata -2; angkat alis 0; mulut x 5; mulut y 2
-```
+Skor **tidak** dipakai memilih satu pemenang, melainkan mem-blend pose. Tiap ekspresi punya pose penuh dalam 4 derajat kebebasan, dan pose akhir = jumlah pose berbobot skor, dikali gerbang keyakinan (`pose = gate × Σ skor × pose_penuh`). Ragu antara dua ekspresi = wajah campuran; makin yakin = amplitudo makin penuh; bingung total = netral. Setelah 2,5 detik tanpa ucapan, pose kembali netral.
 
 | DOF | Rentang | Arti |
 | --- | --- | --- |
@@ -117,15 +113,27 @@ buka mata -2; angkat alis 0; mulut x 5; mulut y 2
 | mulut x | -10..10 | -10 menguncup, 0 normal, 10 senyum lebar |
 | mulut y | 0..10 | 0 mingkem, 10 menganga lebar |
 
-Parser di sisi servo cukup ambil baris stdout yang diawali `buka mata` (baris lain hanya banner/status). Tabel pose per-ekspresi ada di atas `main2.py` (`POSE_PENUH`), disusun mengikuti kombinasi Action Unit **FACS** — itu titik awal yang wajar, silakan tuning ke karakter mekanikmu. Karena outputnya kontinu, tidak ada histeresis; pergerakan antar-baris sudah halus (terukur: lonjakan terbesar 3.6 satuan per langkah). Saat hening, baris berhenti mengalir dan pose terakhir dianggap tetap terpasang.
+Tabel pose per-ekspresi ada di `pose.py` (`POSE_PENUH`), disusun mengikuti kombinasi Action Unit **FACS** — itu titik awal yang wajar, silakan tuning ke karakter mekanikmu. Bobot koreksi per ekspresi (mis. `sedih` ×1.8 karena model cenderung menaruh bicara pelan di netral) ada di `pengendali.py` (`BOBOT_EKSPRESI`); itu heuristik, bukan hasil pengukuran.
 
-Semua opsi `main.py` berlaku (`--threshold` menjadi ambang bawah gerbang keyakinan).
+## Protokol UART ke ESP32
+
+115200 baud 8N1, teks ASCII, satu baris per pose:
+
+```
+E,<buka mata>,<angkat alis>,<mulut x>,<mulut y>\n        contoh: E,-3,1,8,3
+```
+
+- Semua bilangan bulat -10..10 (0 = netral), kecuali `mulut y` 0..10.
+- Pose dikirim tiap ~0,3 dtk selama ada ucapan dan berubah langsung, **tanpa interpolasi** — haluskan gerak servo di firmware ESP32.
+- Baris diulang tiap 0,5 dtk walau pose tetap (keepalive), sehingga ESP32 bisa mendeteksi PC putus (mis. tidak ada baris > 1–2 dtk).
+- Saat program ditutup (Ctrl+C) dikirim `E,0,0,0,0` (netral). ESP32 tidak perlu membalas apa pun.
+- Membuka port me-reset ESP32, jadi program menunggu ±2 dtk sebelum mengirim. Kalau kabel tercabut, program menyambung ulang otomatis tiap 2 dtk.
 
 ## Model
 
-Default: [`Dpngtm/wav2vec2-emotion-recognition`](https://huggingface.co/Dpngtm/wav2vec2-emotion-recognition), 7 label emosi (`angry`, `calm`, `disgust`, `fearful`, `happy`, `sad`, `surprised` — tanpa `neutral`; bicara datar jatuh ke `calm`, yang di sini memang dipetakan ke ekspresi 😐 netral).
+Default: [`Dpngtm/wav2vec2-emotion-recognition`](https://huggingface.co/Dpngtm/wav2vec2-emotion-recognition), 7 label emosi (`angry`, `calm`, `disgust`, `fearful`, `happy`, `sad`, `surprised` — tanpa `neutral`; bicara datar jatuh ke `calm`, yang di sini dipetakan ke netral).
 
-Alternatif 4 label (`neutral`, `happy`, `angry`, `sad`) yang sudah diuji jalan — ekspresi 😲 kaget tidak akan pernah muncul dengannya:
+Alternatif 4 label (`neutral`, `happy`, `angry`, `sad`) yang sudah diuji jalan — ekspresi kaget tidak akan pernah muncul dengannya:
 
 ```bash
 python main.py --model superb/wav2vec2-base-superb-er
@@ -135,15 +143,13 @@ python main.py --model superb/wav2vec2-base-superb-er
 
 ## Yang Perlu Diketahui
 
-**Akurasi SER pada bicara spontan rendah — apalagi bahasa Indonesia.** Model ini dilatih pada RAVDESS: rekaman aktor **berbahasa Inggris** yang *memerankan* emosi dengan ekspresi berlebihan dan kalimat seragam. Bicara Indonesia sehari-hari berbeda di dua lapis sekaligus (bahasa lain + spontan, bukan akting), jadi wajar kalau hasil tes terasa tidak nyambung dengan yang Anda rasakan. Pengelompokan ke 5 ekspresi meredam sebagian besar kekacauannya, tapi tetap perlakukan output sebagai **indikasi kasar**. Cara mengetes yang adil: bicara dengan emosi yang sengaja dilebih-lebihkan seperti sedang akting — itulah domain yang model ini kenal. Jangan dipakai untuk keputusan yang berdampak ke orang.
+**Akurasi SER pada bicara spontan rendah — apalagi bahasa Indonesia.** Model ini dilatih pada RAVDESS: rekaman aktor **berbahasa Inggris** yang *memerankan* emosi dengan ekspresi berlebihan dan kalimat seragam. Bicara Indonesia sehari-hari berbeda di dua lapis sekaligus (bahasa lain + spontan, bukan akting), jadi wajar kalau hasilnya terasa tidak nyambung dengan yang Anda rasakan. Pengelompokan ke 5 ekspresi meredam sebagian kekacauannya, tapi tetap perlakukan output sebagai **indikasi kasar**. Cara mengetes yang adil: bicara dengan emosi yang sengaja dilebih-lebihkan seperti sedang akting — itulah domain yang model ini kenal. Jangan dipakai untuk keputusan yang berdampak ke orang.
 
-**Tebakan pertama tetap butuh ~0.4 detik. Ini wajar, bukan bug.** Emosi tidak bisa dinilai dari audio yang terlalu pendek, jadi model baru menebak setelah terkumpul minimal 0.4 detik ucapan (diukur: tebakan pertama muncul 0.35 dtk setelah bicara dimulai). Setelah itu barulah pembaruan mengalir tiap 0.3 detik. Inferensi sendiri ~110 ms per jendela di CPU, jadi masih longgar terhadap hop 300 ms.
+**Ada jeda sekitar 0,4–1,5 detik sebelum servo bergerak. Ini wajar, bukan bug.** Emosi tidak bisa dinilai dari audio yang terlalu pendek, jadi model baru menebak setelah terkumpul minimal 0.4 detik ucapan. Setelah itu pembaruan mengalir tiap 0.3 detik, dan tebakan awal lebih goyah karena jendela pertama baru berisi ~0.6 detik audio — itu alasan smoothing ada.
 
-**Tebakan awal lebih goyah.** Jendela pertama cuma berisi ~0.6 detik audio, dan model memang tidak stabil di potongan sependek itu — label sering meleset di awal lalu mengendap setelah jendela penuh 1.5 detik. Ini alasan smoothing ada.
+**Peredam bekerja berlapis.** (1) penjumlahan probabilitas label serumpun, (2) EMA `--smooth` (pada rekaman uji 15 detik: tanpa smoothing label berganti 7×/27 jendela, di `0.4` jadi 5×, di `0.2` jadi 3×), (3) gerbang keyakinan yang menekan pose ke netral saat model bingung. Jalankan dengan `--verbose` untuk melihat skor di balik tiap pose.
 
-**Tiga lapis peredam bekerja bersama.** Menilai potongan 1.5 detik satu per satu memang bising — label emosi mentah bisa berganti-ganti tiap jendela. Yang menjaga wajah tetap tenang: (1) penjumlahan probabilitas label serumpun, (2) EMA `--smooth` (pada rekaman uji: tanpa smoothing label berganti 7×/27 jendela, di `0.4` jadi 5×, di `0.2` jadi 3×), lalu (3) histeresis pergantian ekspresi. Jalankan dengan `--verbose` kalau ingin melihat skor mentah per ekspresi di balik keputusan.
-
-**Model butuh input 16 kHz.** Salah sample rate = hasil ngawur, bukan sekadar kurang akurat. Program mencoba membuka mic langsung di 16 kHz; kalau device tidak mendukung, ia memakai sample rate bawaan device lalu me-resample ke 16 kHz secara otomatis (`torchaudio`). Jalankan dengan `--verbose` untuk melihat rate mana yang dipakai.
+**Model butuh input 16 kHz.** Salah sample rate = hasil ngawur, bukan sekadar kurang akurat. Program mencoba membuka mic langsung di 16 kHz; kalau device tidak mendukung, ia memakai sample rate bawaan device lalu me-resample ke 16 kHz otomatis (`torchaudio`). Jalankan dengan `--verbose` untuk melihat rate mana yang dipakai, dan `--list-devices` untuk memilih mic.
 
 ## Troubleshooting
 
@@ -168,37 +174,27 @@ Index device di sisi input adalah angka di kolom paling kiri. Di macOS, pastikan
 
 **"speech detected" tidak pernah muncul padahal RMS naik**
 
-VAD terlalu ketat untuk mic Anda. Turunkan ambangnya:
+VAD terlalu ketat untuk mic Anda. Turunkan ambangnya dengan `--vad-threshold 0.3`. Sebaliknya, kalau "speech detected" muncul terus padahal sunyi (mic berisik), naikkan ke `0.6`–`0.7`.
 
-```bash
-python main.py --vad-threshold 0.3
-```
+**Servo tidak bergerak / `Gagal membuka port servo`**
 
-Sebaliknya, kalau "speech detected" muncul terus padahal sunyi (mic berisik), naikkan ke `0.6`–`0.7`.
+Cek `python main.py --list-ports` dan pastikan port benar, kabel USB data (bukan kabel charge-only), dan tidak ada aplikasi lain (Serial Monitor Arduino IDE) yang memegang port. Tanpa `--port`, pose hanya dicetak; kalau baris pose tercetak tapi servo diam, masalahnya di firmware ESP32/PCA9685.
 
-**Muncul `🤷 (belum yakin: ...)` di awal**
-
-Belum ada ekspresi terpasang dan skor tertinggi masih di bawah `--threshold`. Hanya terjadi di ucapan pertama; setelah ada ekspresi terpasang, skor rendah membuat wajah bertahan, bukan jadi tanda tanya. Turunkan `--threshold` kalau ingin ekspresi pertama terpasang lebih cepat.
-
-**Terasa masih kurang responsif**
-
-Perkecil hop dan jendelanya:
+**Terasa kurang responsif**
 
 ```bash
 python main.py --hop 0.2 --window 1.0 --smooth 0.7
 ```
 
-Konsekuensinya: tebakan lebih sering tapi lebih goyah, dan CPU lebih sibuk. Kalau inferensi tidak sanggup mengejar hop, program otomatis membuang jendela basi — output tetap terkini, hanya saja beberapa pembaruan terlewat.
+Konsekuensinya: tebakan lebih sering tapi lebih goyah, dan CPU lebih sibuk. Kalau inferensi tidak sanggup mengejar hop, program otomatis membuang jendela basi — output tetap terkini, hanya beberapa pembaruan terlewat.
 
-**Ekspresi masih terasa gampang berganti**
-
-Perbesar peredamannya (angka lebih kecil = lebih kalem), atau perpanjang jendelanya:
+**Pose terlalu gampang berganti**
 
 ```bash
 python main.py --smooth 0.2 --window 2.0
 ```
 
-Sebaliknya, kalau wajah terasa terlalu lengket pada satu ekspresi, naikkan `--smooth` (mis. `0.7`).
+Sebaliknya, kalau pose terlalu lengket, naikkan `--smooth` (mis. `0.7`).
 
 **Gagal membuka mic / `PortAudioError`**
 

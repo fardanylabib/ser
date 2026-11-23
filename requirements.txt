@@ -4,3 +4,4 @@ torch>=2.2
 torchaudio>=2.2
 silero-vad>=5.1
 transformers>=4.40
+pyserial>=3.5
