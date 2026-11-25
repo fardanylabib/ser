@@ -20,7 +20,7 @@ from typing import Any, Callable, Optional
 
 import numpy as np
 
-from audio import PenangkapAudio, buat_resampler
+from audio import PenangkapAudio, buat_resampler, terapkan_gain
 from konfigurasi import SAMPLE_RATE, VAD_FRAME
 from model_emosi import PengenalEmosi
 from vad import SegmenterVAD
@@ -77,6 +77,7 @@ def uji_rms(args: argparse.Namespace) -> int:
                     blok = antrian_audio.get(timeout=0.5)
                 except queue.Empty:
                     continue
+                blok = terapkan_gain(blok, args.gain)
                 rms = float(np.sqrt(np.mean(np.square(blok))))
                 bar = "#" * min(50, int(rms * 400))
                 print(f"\rrms {rms:.4f} |{bar:<50}|", end="", flush=True)
@@ -145,7 +146,7 @@ def jalankan(
                 except queue.Empty:
                     continue
 
-                sisa = np.concatenate([sisa, resample(blok)])
+                sisa = np.concatenate([sisa, terapkan_gain(resample(blok), args.gain)])
 
                 # Proses per frame 512 sampel sesuai kebutuhan Silero VAD.
                 while len(sisa) >= VAD_FRAME:

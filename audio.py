@@ -33,6 +33,10 @@ class PenangkapAudio:
             samplerate=self.samplerate,
             dtype="float32",
             blocksize=int(self.samplerate * 0.032),
+            # Buffer PortAudio dibuat besar. Default "low" terlalu tipis untuk mic USB
+            # di Raspberry Pi: sedikit telat membaca saja sudah "input overflow" dan
+            # audio bolong. Imbalannya hanya jeda tangkap sekian puluh ms.
+            latency="high",
             callback=self._callback,
         )
 
@@ -63,17 +67,32 @@ class PenangkapAudio:
         self.stream.close()
 
 
+def terapkan_gain(blok: np.ndarray, gain: float) -> np.ndarray:
+    """Kalikan amplitudo dengan `gain` lalu potong ke [-1, 1] (gain 1.0 = tidak diubah).
+
+    Untuk mic yang levelnya kecil padahal gain ALSA sudah maksimum.
+    """
+    if gain == 1.0:
+        return blok
+    return np.clip(blok * gain, -1.0, 1.0)
+
+
 def buat_resampler(rate_sumber: int) -> Callable[[np.ndarray], np.ndarray]:
     """Kembalikan fungsi resample ke 16 kHz (identitas kalau rate sudah pas)."""
     if rate_sumber == SAMPLE_RATE:
         return lambda blok: blok
 
     import torch
-    import torchaudio.functional as AF
+    import torchaudio.transforms as T
+
+    # Kernel filter dihitung SEKALI di sini. `torchaudio.functional.resample`
+    # menghitung ulang kernel di tiap panggilan; untuk blok 32 ms (31x/detik)
+    # itu ~8x lebih lambat dan di Raspberry Pi bisa membuat pembacaan mic
+    # tertinggal (log "input overflow"). Hasil audionya sama.
+    pengubah = T.Resample(rate_sumber, SAMPLE_RATE)
 
     def resample(blok: np.ndarray) -> np.ndarray:
-        tensor = torch.from_numpy(blok).unsqueeze(0)
-        keluar = AF.resample(tensor, rate_sumber, SAMPLE_RATE)
-        return keluar.squeeze(0).numpy()
+        with torch.inference_mode():
+            return pengubah(torch.from_numpy(blok).unsqueeze(0)).squeeze(0).numpy()
 
     return resample

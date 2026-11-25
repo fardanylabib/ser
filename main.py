@@ -53,6 +53,12 @@ def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
 
     p.add_argument("--device", type=int, default=None, help="Index device input mic.")
     p.add_argument("--list-devices", action="store_true", help="Tampilkan device audio.")
+    p.add_argument(
+        "--gain",
+        type=float,
+        default=1.0,
+        help="Penguat amplitudo mic (default 1.0). Naikkan, mis. 4, kalau suara terlalu kecil.",
+    )
     p.add_argument("--rms", action="store_true", help="Mode uji: cetak level mic saja.")
     p.add_argument("--model", default=MODEL_ID, help="ID model SER di HuggingFace.")
     p.add_argument(

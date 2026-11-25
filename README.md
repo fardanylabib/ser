@@ -94,6 +94,7 @@ Opsi:
 | `--i2c-bus N` | Nomor bus I2C (`1` = `/dev/i2c-1`, pin GPIO2/GPIO3). Kosong = hanya cetak pose |
 | `--list-devices` | Tampilkan semua device audio beserta index-nya |
 | `--device N` | Pilih mic tertentu berdasarkan index |
+| `--gain 1.0` | Penguat amplitudo mic. Naikkan (mis. `4`) kalau mic terlalu pelan padahal gain ALSA sudah maksimum |
 | `--rms` | Mode uji: cetak level mic saja, tanpa VAD/model/servo |
 | `--threshold 0.4` | Ambang bawah gerbang keyakinan; di bawahnya pose memudar ke netral |
 | `--vad-threshold 0.5` | Sensitivitas VAD (kecil = lebih sensitif) |
