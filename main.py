@@ -1,32 +1,4 @@
-"""SER Terminal — dengar ucapan dari mic, gerakkan servo wajah (ESP32 + PCA9685).
-
-Emosi ucapan dideteksi wav2vec2 SER, diterjemahkan ke 5 ekspresi (senyum, netral,
-sedih, marah, kaget), lalu jadi pose 11 servo yang dikirim ke ESP32 lewat USB-serial:
-
-    mic -> VAD -> wav2vec2 -> skor ekspresi -> pose 11 servo
-        --USB/UART--> ESP32 --I2C--> PCA9685 --> servo
-
-File ini hanya perakit (CLI + menyambung objek). Logikanya ada di:
-    pipeline.py     jalankan(): mic -> resample -> VAD -> thread inferensi
-    audio.py        PenangkapAudio (sounddevice, non-blocking)
-    vad.py          SegmenterVAD (Silero VAD -> jendela ucapan)
-    model_emosi.py  PengenalEmosi (wav2vec2 HuggingFace) + peta label -> ekspresi
-    pose.py         tabel pose (7 gerakan -> 11 servo) + blend skor -> pose
-    pengendali.py   PengendaliEkspresi (model -> pose -> servo)
-    servo.py        PengirimServo (UART ke ESP32; tanpa port = cetak ke terminal)
-
-Tanpa `--port`, pose dicetak ke terminal (uji tanpa hardware).
-
-Jalankan:
-    python main.py --list-ports
-    python main.py --port /dev/cu.usbserial-0001           # macOS/Linux
-    python main.py --port COM5                              # Windows
-    python main.py                                          # cetak pose saja
-    python main.py --list-devices                           # daftar mic
-    python main.py --device 2 --rms                         # uji level mic saja
-"""
-
-from __future__ import annotations
+"""SER Terminal — dengar ucapan dari mic, gerakkan servo wajah lewat ESP32."""
 
 import argparse
 import logging
@@ -39,7 +11,6 @@ from pipeline import jalankan, uji_rms
 from servo import BAUD_DEFAULT, PengirimServo
 
 log = logging.getLogger("ser")
-
 
 def parse_args(argv: Optional[list[str]] = None) -> argparse.Namespace:
     p = argparse.ArgumentParser(
@@ -141,7 +112,6 @@ def main(argv: Optional[list[str]] = None) -> int:
         return jalankan(args, pengendali.loop)
     finally:
         servo.tutup()  # servo: kirim netral lalu tutup port
-
 
 if __name__ == "__main__":
     raise SystemExit(main())

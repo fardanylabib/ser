@@ -1,16 +1,4 @@
-"""Pipeline: mic -> resample 16 kHz -> Silero VAD -> jendela ucapan -> thread inferensi.
-
-    mic -> callback sounddevice -> antrian audio
-        -> resample ke 16 kHz -> Silero VAD (ada ucapan / tidak)
-        -> jendela geser tiap `hop` detik selama ada ucapan -> antrian segmen
-        -> thread inferensi (`loop_fn`, mis. PengendaliEkspresi.loop)
-
-Pipeline tidak tahu apa yang dilakukan dengan hasil inferensi; itu urusan `loop_fn`.
-`args` adalah hasil argparse dari main.py; yang dipakai: device, model,
-vad_threshold, window, hop.
-"""
-
-from __future__ import annotations
+"""Pipeline: mic -> resample 16 kHz -> Silero VAD -> jendela ucapan -> thread inferensi."""
 
 import argparse
 import logging
@@ -32,11 +20,7 @@ AKHIR = "akhir"
 
 
 def kirim_terbaru(antrian: queue.Queue, item: Any) -> None:
-    """Masukkan item; kalau antrian penuh, buang yang terlama.
-
-    Untuk realtime, tebakan basi tidak ada gunanya — lebih baik dibuang daripada
-    membuat output tertinggal makin jauh di belakang suara yang sedang berjalan.
-    """
+    """Masukkan item; kalau antrian penuh, buang yang terlama."""
     while True:
         try:
             antrian.put_nowait(item)
@@ -89,20 +73,19 @@ def jalankan(
     args: argparse.Namespace,
     loop_fn: Callable[[PengenalEmosi, queue.Queue, threading.Event], None],
 ) -> int:
-    """Jalankan sampai Ctrl+C. `loop_fn(pengenal, antrian_segmen, berhenti)` jalan di thread inferensi."""
+    """Jalankan sampai Ctrl+C; `loop_fn` jalan di thread inferensi."""
     antrian_audio: queue.Queue = queue.Queue()
-    # Antrian sengaja pendek: kalau inferensi tertinggal, lebih baik jendela lama
-    # dibuang (lihat `kirim_terbaru`) daripada output makin telat dari suaranya.
+    # Antrian pendek: jendela lama dibuang kalau inferensi tertinggal.
     antrian_segmen: queue.Queue = queue.Queue(maxsize=2)
     berhenti = threading.Event()
 
-    # --- buka mic dulu, biar error device ketahuan sebelum download model ---
+    # Buka mic dulu agar error device cepat ketahuan.
     penangkap = buka_mic(args.device, antrian_audio)
     if penangkap is None:
         return 1
     resample = buat_resampler(penangkap.samplerate)
 
-    # --- VAD ---
+    # VAD
     try:
         from silero_vad import VADIterator, load_silero_vad
 
@@ -116,7 +99,7 @@ def jalankan(
         log.error("Gagal memuat Silero VAD: %s", exc)
         return 1
 
-    # --- model emosi ---
+    # Model emosi
     try:
         pengenal = PengenalEmosi(args.model)
     except Exception as exc:
@@ -147,7 +130,7 @@ def jalankan(
 
                 sisa = np.concatenate([sisa, resample(blok)])
 
-                # Proses per frame 512 sampel sesuai kebutuhan Silero VAD.
+                # Per frame 512 sampel sesuai Silero VAD.
                 while len(sisa) >= VAD_FRAME:
                     frame, sisa = sisa[:VAD_FRAME], sisa[VAD_FRAME:]
                     mulai, audio, selesai = segmenter.proses(frame)
@@ -162,7 +145,7 @@ def jalankan(
         print("\n[berhenti]", flush=True)
     finally:
         berhenti.set()
-        # Sentinel agar thread inferensi tidak menunggu sampai timeout.
+        # Sentinel agar thread inferensi langsung berhenti.
         kirim_terbaru(antrian_segmen, None)
         pekerja.join(timeout=2.0)
         vad.reset_states()

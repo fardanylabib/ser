@@ -1,7 +1,5 @@
 """Model emosi wav2vec2 (HuggingFace) + pemetaan label model -> 5 ekspresi wajah."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -11,15 +9,7 @@ from konfigurasi import MODEL_ID, SAMPLE_RATE
 
 log = logging.getLogger("ser.model")
 
-# Ekspresi wajah robot: senyum / netral / sedih / marah / kaget. Sengaja sedikit
-# dan tegas — tiap ekspresi punya satu pose servo (lihat pose.py). Label emosi
-# model yang mirip digabung ke ekspresi yang sama; kategori kasar begini juga
-# lebih stabil daripada 7-8 label halus.
-#
-# Peta label emosi model -> ekspresi wajah. Mencakup nama/singkatan yang dipakai
-# model alternatif (mis. superb/wav2vec2-base-superb-er). Probabilitas label yang
-# menunjuk ekspresi sama akan DIJUMLAHKAN, jadi keraguan model antara mis.
-# 'fearful' dan 'surprised' tidak membuat wajah robot ikut ragu.
+# Peta label emosi model -> ekspresi wajah; probabilitas label serumpun dijumlahkan.
 LABEL_KE_EKSPRESI: dict[str, str] = {
     "happy": "senyum",
     "happiness": "senyum",
@@ -38,7 +28,7 @@ LABEL_KE_EKSPRESI: dict[str, str] = {
     "surprise": "kaget",
 }
 
-# Urutan label RAVDESS, dipakai kalau config model hanya berisi LABEL_0..LABEL_7.
+# Urutan label RAVDESS, fallback kalau config hanya berisi LABEL_n.
 RAVDESS_ORDER = [
     "angry",
     "calm",
@@ -52,11 +42,7 @@ RAVDESS_ORDER = [
 
 
 def peta_ekspresi(labels: list[str]) -> list[str]:
-    """Bangun peta index-label -> nama ekspresi untuk satu model.
-
-    Label yang tidak dikenal dipetakan ke 'netral' (wajah aman untuk robot)
-    sambil dicatat di log, supaya model custom apa pun tetap jalan.
-    """
+    """Bangun peta index-label -> nama ekspresi; label asing jadi 'netral'."""
     peta = []
     for label in labels:
         eks = LABEL_KE_EKSPRESI.get(label.lower().strip())
@@ -72,7 +58,7 @@ def rapikan_nama_label(config: Any) -> list[str]:
     id2label = getattr(config, "id2label", None) or {}
     labels = [str(id2label.get(i, f"LABEL_{i}")) for i in range(len(id2label))]
 
-    # Beberapa checkpoint tidak menyimpan nama label asli, hanya LABEL_n.
+    # Checkpoint tanpa nama label asli.
     if labels and all(nama.upper().startswith("LABEL_") for nama in labels):
         if len(labels) == len(RAVDESS_ORDER):
             log.warning("Config model tanpa nama label, memakai urutan RAVDESS.")
@@ -81,11 +67,7 @@ def rapikan_nama_label(config: Any) -> list[str]:
 
 
 class PengenalEmosi:
-    """Bungkus model wav2vec2 SER dari HuggingFace. Di-load sekali di awal.
-
-    Atribut: `labels` (nama label mentah model) dan `peta` (ekspresi wajah untuk
-    tiap label, indeksnya sejajar dengan `labels`).
-    """
+    """Bungkus model wav2vec2 SER dari HuggingFace, di-load sekali di awal."""
 
     def __init__(self, model_id: str = MODEL_ID) -> None:
         import torch
@@ -99,7 +81,7 @@ class PengenalEmosi:
             self.extractor = AutoFeatureExtractor.from_pretrained(model_id)
             self.model = AutoModelForAudioClassification.from_pretrained(model_id)
         except OSError as exc:
-            # Jaringan bermasalah tapi model mungkin sudah ada di cache HF.
+            # Jaringan bermasalah, coba cache HF.
             log.warning("Gagal menghubungi HuggingFace (%s), coba pakai cache...", exc)
             self.extractor = AutoFeatureExtractor.from_pretrained(
                 model_id, local_files_only=True

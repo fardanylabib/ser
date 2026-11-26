@@ -1,10 +1,4 @@
-"""Pengendali ekspresi: hasil model SER -> pose -> servo.
-
-Alur tiap jendela audio:
-    probabilitas model -> EMA (peredam) -> skor 5 ekspresi -> pose -> kirim
-"""
-
-from __future__ import annotations
+"""Pengendali ekspresi: hasil model SER -> pose -> servo."""
 
 import logging
 import queue
@@ -26,19 +20,11 @@ IDLE_SEC = 2.5
 """Tanpa tebakan baru selama ini, pose dikembalikan ke netral."""
 
 BOBOT_EKSPRESI: dict[str, float] = {"sedih": 1.8, "netral": 0.7}
-"""Koreksi skor per ekspresi sebelum dinormalkan ulang.
-
-Model dilatih pada akting dan menggabungkan 'calm' + 'neutral' ke netral, jadi
-bicara pelan/datar yang sebenarnya sedih hampir selalu jatuh ke netral. Bobot
-ini menggeser keputusan ke arah sedih. Heuristik, bukan hasil pengukuran:
-kalau terlalu sering salah sedih, turunkan 1.8; kalau masih kurang, naikkan."""
+"""Koreksi skor per ekspresi (heuristik) sebelum dinormalkan ulang."""
 
 
 class PengendaliEkspresi:
-    """Mengubah jendela audio jadi pose dan mengirimnya ke `servo`.
-
-    `loop` dijalankan di thread inferensi.
-    """
+    """Mengubah jendela audio jadi pose dan mengirimnya ke servo."""
 
     def __init__(
         self,
@@ -91,10 +77,10 @@ class PengendaliEkspresi:
         self.servo.kirim(self.pose)
 
     def _saat_diam(self) -> None:
-        """Antrean kosong: kembali ke netral kalau sudah lama diam, lalu kirim ulang pose."""
+        """Antrean kosong: netral kalau lama diam, lalu kirim ulang pose."""
         if time.monotonic() - self.waktu_tebakan > IDLE_SEC:
             self.pose = dict(pose.NETRAL)
-        self.servo.kirim(self.pose)  # servo hanya menulis kalau berubah; ini juga mencoba ulang saat port baru tersambung
+        self.servo.kirim(self.pose)  # servo hanya menulis kalau berubah
 
     @staticmethod
     def _skor_ekspresi(probs: np.ndarray, peta: list[str]) -> dict[str, float]:

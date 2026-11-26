@@ -1,7 +1,5 @@
 """Konstanta bersama untuk pipeline audio -> VAD -> model emosi."""
 
-from __future__ import annotations
-
 SAMPLE_RATE = 16_000
 """Sample rate wajib untuk Silero VAD maupun model wav2vec2."""
 
@@ -27,10 +25,4 @@ PREROLL_SEC = 0.3
 """Audio sebelum VAD memicu 'start', supaya awal kata tidak terpotong."""
 
 SMOOTH_ALPHA = 0.4
-"""Bobot tebakan baru saat smoothing. 1.0 = tanpa smoothing, kecil = lebih kalem.
-
-Diukur pada rekaman mic 15 detik: tanpa smoothing label berganti 7x dari 27
-tebakan, di 0.4 jadi 5x, di 0.2 jadi 3x. Nilai kecil makin kalem tapi makin
-lambat menyusul perubahan emosi yang sungguhan, jadi 0.4 diambil sebagai
-kompromi — masih terasa realtime.
-"""
+"""Bobot tebakan baru saat smoothing (1.0 = tanpa smoothing)."""

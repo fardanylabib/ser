@@ -1,7 +1,5 @@
 """Penangkapan audio dari mic (non-blocking) + resample ke 16 kHz."""
 
-from __future__ import annotations
-
 import logging
 import queue
 from typing import Any, Callable, Optional
@@ -14,11 +12,7 @@ log = logging.getLogger("ser.audio")
 
 
 class PenangkapAudio:
-    """Buka input stream sounddevice dan lempar blok audio ke antrian.
-
-    Callback sengaja dibuat sangat ringan (hanya copy + put) agar tidak pernah
-    mem-block PortAudio. Resample dan VAD dikerjakan di thread lain.
-    """
+    """Buka input stream sounddevice dan lempar blok audio ke antrian."""
 
     def __init__(self, device: Optional[int], antrian: queue.Queue) -> None:
         import sounddevice as sd

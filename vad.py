@@ -1,7 +1,5 @@
 """Segmentasi ucapan berbasis Silero VAD."""
 
-from __future__ import annotations
-
 from collections import deque
 from typing import Any, Deque, Optional
 
@@ -18,19 +16,7 @@ from konfigurasi import (
 
 
 class SegmenterVAD:
-    """Ubah aliran frame 512 sampel jadi jendela-jendela audio siap-inferensi.
-
-    Berbeda dari pendekatan "tunggu frasa selesai": selama VAD bilang masih ada
-    ucapan, tiap `hop_sec` kelas ini mengeluarkan `window_sec` detik audio
-    TERAKHIR. Jadi model menebak berulang kali sambil orangnya masih bicara,
-    bukan sekali di akhir kalimat.
-
-    Buffer sengaja dipangkas sepanjang jendela saja — kita hanya peduli emosi
-    yang sedang berlangsung, dan itu juga yang menjaga penggunaan memori tetap
-    datar berapa lama pun orang bicara.
-
-    Dipisah dari loop mic supaya logikanya bisa diuji dengan file audio biasa.
-    """
+    """Ubah aliran frame 512 sampel jadi jendela geser audio siap-inferensi."""
 
     def __init__(
         self,
@@ -53,12 +39,7 @@ class SegmenterVAD:
         self.sedang_bicara = False
 
     def proses(self, frame: np.ndarray) -> tuple[bool, Optional[np.ndarray], bool]:
-        """Masukkan satu frame 512 sampel, kembalikan (mulai, audio, selesai).
-
-        mulai  : True tepat saat VAD mendeteksi awal ucapan.
-        audio  : jendela audio siap-inferensi, atau None kalau belum waktunya menebak.
-        selesai: True tepat saat ucapan berhenti (frasa ditutup).
-        """
+        """Proses satu frame; kembalikan (mulai, audio atau None, selesai)."""
         mulai = False
         selesai = False
         audio: Optional[np.ndarray] = None
@@ -72,7 +53,7 @@ class SegmenterVAD:
 
         if hasil and "start" in hasil and not self.sedang_bicara:
             self.sedang_bicara = True
-            # Sertakan pre-roll agar awal kata tidak terpotong.
+            # Sertakan pre-roll agar awal kata utuh.
             self.buffer.clear()
             self.panjang = 0
             self.sejak_tebak = 0
@@ -82,7 +63,7 @@ class SegmenterVAD:
             mulai = True
 
         elif hasil and "end" in hasil and self.sedang_bicara:
-            # Tebakan terakhir untuk frasa ini, lalu tutup.
+            # Tebakan terakhir frasa ini, lalu tutup.
             audio = self._jendela()
             self.sedang_bicara = False
             self.buffer.clear()
@@ -96,7 +77,7 @@ class SegmenterVAD:
         return mulai, audio, selesai
 
     def _tambah(self, frame: np.ndarray) -> None:
-        """Masukkan frame ke buffer, buang yang sudah keluar dari jendela."""
+        """Masukkan frame ke buffer, buang yang keluar dari jendela."""
         self.buffer.append(frame)
         self.panjang += len(frame)
         self.sejak_tebak += len(frame)
@@ -104,13 +85,13 @@ class SegmenterVAD:
             self.panjang -= len(self.buffer.popleft())
 
     def _jendela(self) -> Optional[np.ndarray]:
-        """Salinan isi buffer, atau None kalau audio belum cukup panjang."""
+        """Salinan isi buffer, atau None kalau belum cukup panjang."""
         if self.panjang < self.min_sampel:
-            return None  # terlalu pendek, model belum punya bahan
+            return None  # terlalu pendek
         return np.concatenate(self.buffer)
 
     def selesaikan(self) -> Optional[np.ndarray]:
-        """Tutup ucapan yang masih menggantung (dipakai saat aliran audio habis)."""
+        """Tutup ucapan yang masih menggantung."""
         if not self.sedang_bicara:
             return None
         self.sedang_bicara = False

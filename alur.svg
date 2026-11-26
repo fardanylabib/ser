@@ -1,0 +1,188 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1200 1935" width="1200" height="1935" font-family="-apple-system, Helvetica, Arial, sans-serif">
+<title>Alur program SER Terminal</title><defs><marker id="ag" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#4b5563"/></marker><marker id="ar" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse"><path d="M0,0 L10,5 L0,10 z" fill="#dc2626"/></marker><style>.t{font-size:13px;font-weight:600;fill:#111827}.s{font-size:11.5px;fill:#4b5563}.m{font-size:11px;fill:#374151}.e{font-size:11px;fill:#b91c1c}.h{font-size:12px;font-weight:700}</style></defs>
+<rect width="1200" height="1935" fill="#ffffff"/>
+<text x="600" y="30" class="t" text-anchor="middle" font-size="20">Alur program SER Terminal: dari main() sampai selesai</text>
+<text x="40" y="48" class="t" text-anchor="start">Keterangan</text>
+<rect x="40" y="60" width="22" height="14" rx="3" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="70" y="71" class="m" text-anchor="start">thread utama (tangkap, VAD)</text>
+<rect x="40" y="82" width="22" height="14" rx="3" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+<text x="70" y="93" class="m" text-anchor="start">thread 'inferensi' (model, pose, servo)</text>
+<rect x="40" y="104" width="22" height="14" rx="3" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+<text x="70" y="115" class="m" text-anchor="start">antrian queue.Queue (batas antar-thread)</text>
+<rect x="40" y="126" width="22" height="14" rx="3" fill="#ffedd5" stroke="#fb923c" stroke-width="1.5"/>
+<text x="70" y="137" class="m" text-anchor="start">percabangan</text>
+<rect x="40" y="148" width="22" height="14" rx="3" fill="#fce7f3" stroke="#ec4899" stroke-width="1.5"/>
+<text x="70" y="159" class="m" text-anchor="start">perangkat keras (ESP32, servo)</text>
+<rect x="40" y="170" width="22" height="14" rx="3" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+<text x="70" y="181" class="m" text-anchor="start">gagal: return 1 (garis merah putus)</text>
+<rect x="500" y="48" width="200" height="40" rx="20" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+<text x="600.0" y="64.2" class="t" text-anchor="middle">main()</text>
+<text x="600.0" y="80.8" class="s" text-anchor="middle">main.py</text>
+<path d="M600,88 V108" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="430" y="108" width="340" height="40" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="132.5" class="t" text-anchor="middle">parse_args() + logging.basicConfig()</text>
+<path d="M600,148 V170" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<polygon points="430,215 600,170 770,215 600,260" fill="#ffedd5" stroke="#fb923c" stroke-width="1.5"/>
+<text x="600" y="220" class="t" text-anchor="middle">mode khusus?</text>
+<path d="M770,215 H830" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<text x="800" y="208" class="m" text-anchor="middle">ya</text>
+<rect x="830" y="180" width="330" height="70" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="995.0" y="203.0" class="t" text-anchor="middle">daftar_device() / daftar_port() / uji_rms()</text>
+<text x="995.0" y="219.5" class="s" text-anchor="middle">--list-devices · --list-ports · --rms</text>
+<text x="995.0" y="236.0" class="s" text-anchor="middle">lalu keluar tanpa menyentuh servo</text>
+<path d="M995,250 V258" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="900" y="258" width="190" height="30" rx="16" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+<text x="995.0" y="277.5" class="t" text-anchor="middle">return (selesai)</text>
+<path d="M600,260 V295" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<text x="612" y="282" class="m" text-anchor="start">tidak</text>
+<rect x="430" y="295" width="340" height="44" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="313.2" class="t" text-anchor="middle">PengirimServo(port, baud).buka()</text>
+<text x="600.0" y="329.8" class="s" text-anchor="middle">tanpa --port = mode cetak pose saja</text>
+<path d="M770,317 H830" fill="none" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+<rect x="830" y="300" width="330" height="34" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+<text x="995.0" y="321.5" class="e" text-anchor="middle">gagal buka port / pyserial → return 1</text>
+<path d="M600,339 V359" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="430" y="359" width="340" height="40" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="383.5" class="t" text-anchor="middle">PengendaliEkspresi(servo, threshold, smooth)</text>
+<path d="M600,399 V419" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="430" y="419" width="340" height="40" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="435.2" class="t" text-anchor="middle">jalankan(args, pengendali.loop)</text>
+<text x="600.0" y="451.8" class="s" text-anchor="middle">pipeline.py</text>
+<path d="M600,459 V480" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="40" y="480" width="1120" height="368" rx="12" fill="#fafafa" stroke="#d1d5db" stroke-width="1.2"/>
+<text x="56" y="502" class="h" text-anchor="start" fill="#374151">pipeline.jalankan(): persiapan</text>
+<rect x="370" y="512" width="460" height="34" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="533.5" class="t" text-anchor="middle">buat antrian_audio, antrian_segmen(maxsize=2), Event berhenti</text>
+<path d="M600,546 V560" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="370" y="560" width="460" height="34" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="600.0" y="581.5" class="t" text-anchor="middle">buka_mic() → PenangkapAudio (16 kHz atau rate bawaan)</text>
+<path d="M600,594 V608" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<path d="M830,577 H860" fill="none" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+<rect x="860" y="560" width="250" height="34" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+<text x="985.0" y="581.5" class="e" text-anchor="middle">gagal buka mic → return 1</text>
+<rect x="370" y="608" width="460" height="34" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="600.0" y="629.5" class="t" text-anchor="middle">buat_resampler(penangkap.samplerate)</text>
+<path d="M600,642 V656" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="370" y="656" width="460" height="34" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="677.5" class="t" text-anchor="middle">muat Silero VAD (VADIterator, threshold --vad-threshold)</text>
+<path d="M600,690 V704" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<path d="M830,673 H860" fill="none" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+<rect x="860" y="656" width="250" height="34" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+<text x="985.0" y="677.5" class="e" text-anchor="middle">gagal muat VAD → return 1</text>
+<rect x="370" y="704" width="460" height="34" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="725.5" class="t" text-anchor="middle">muat PengenalEmosi (wav2vec2 di cuda atau cpu)</text>
+<path d="M600,738 V752" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<path d="M830,721 H860" fill="none" stroke="#dc2626" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ar)"/>
+<rect x="860" y="704" width="250" height="34" rx="8" fill="#fee2e2" stroke="#dc2626" stroke-width="1.5"/>
+<text x="985.0" y="725.5" class="e" text-anchor="middle">gagal muat model → return 1</text>
+<rect x="370" y="752" width="460" height="34" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+<text x="600.0" y="773.5" class="t" text-anchor="middle">start thread 'inferensi' (pengendali.loop) + SegmenterVAD</text>
+<path d="M600,786 V800" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="370" y="800" width="460" height="34" rx="8" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+<text x="600.0" y="821.5" class="t" text-anchor="middle">cetak [listening...]</text>
+<path d="M600,848 V872" fill="none" stroke="#4b5563" stroke-width="1.6"/>
+<path d="M265,872 H935" fill="none" stroke="#4b5563" stroke-width="1.6"/>
+<path d="M265,872 V896" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<path d="M935,872 V896" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="30" y="896" width="470" height="660" rx="12" fill="#eff6ff" stroke="#93c5fd" stroke-width="1.2"/>
+<rect x="700" y="896" width="470" height="660" rx="12" fill="#f0fdf4" stroke="#86efac" stroke-width="1.2"/>
+<text x="44" y="918" class="h" text-anchor="start" fill="#1d4ed8">THREAD UTAMA: tangkap, resample, VAD</text>
+<text x="714" y="918" class="h" text-anchor="start" fill="#15803d">THREAD 'inferensi': model, pose, servo</text>
+<rect x="70" y="935" width="390" height="44" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="265.0" y="953.2" class="t" text-anchor="middle">Callback sounddevice (thread PortAudio)</text>
+<text x="265.0" y="969.8" class="s" text-anchor="middle">blok 32 ms, tidak pernah menunggu model</text>
+<path d="M265,979 V999" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="70" y="999" width="390" height="44" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+<text x="265.0" y="1017.2" class="t" text-anchor="middle">antrian_audio</text>
+<text x="265.0" y="1033.8" class="s" text-anchor="middle">antrian_audio.get(timeout 0,5)</text>
+<path d="M265,1043 V1063" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="70" y="1063" width="390" height="44" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="265.0" y="1081.2" class="t" text-anchor="middle">resample(blok) → 16 kHz</text>
+<text x="265.0" y="1097.8" class="s" text-anchor="middle">digabung ke buffer sisa</text>
+<path d="M265,1107 V1127" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="70" y="1127" width="390" height="44" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="265.0" y="1145.2" class="t" text-anchor="middle">potong frame 512 sampel (32 ms)</text>
+<text x="265.0" y="1161.8" class="s" text-anchor="middle">while len(sisa) &gt;= 512</text>
+<path d="M265,1171 V1191" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="70" y="1191" width="390" height="64" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="265.0" y="1211.0" class="t" text-anchor="middle">SegmenterVAD.proses(frame)</text>
+<text x="265.0" y="1227.5" class="s" text-anchor="middle">Silero VAD memberi event start / end</text>
+<text x="265.0" y="1244.0" class="s" text-anchor="middle">preroll 0,3 · jendela 1,5 · hop 0,3 · min 0,4 (detik)</text>
+<path d="M265,1255 V1275" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="70" y="1275" width="390" height="84" rx="8" fill="#dbeafe" stroke="#3b82f6" stroke-width="1.5"/>
+<text x="265.0" y="1296.8" class="t" text-anchor="middle">keluaran proses()</text>
+<text x="265.0" y="1313.2" class="s" text-anchor="middle">mulai → cetak 'speech detected'</text>
+<text x="265.0" y="1329.8" class="s" text-anchor="middle">audio → kirim_terbaru(jendela)</text>
+<text x="265.0" y="1346.2" class="s" text-anchor="middle">selesai → kirim_terbaru(AKHIR)</text>
+<path d="M70,1317 H50 V1021 H70" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<text x="0" y="0" class="m" text-anchor="middle" transform="translate(44 1170) rotate(-90)">ulang terus sampai Ctrl+C</text>
+<path d="M265,1359 V1440" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ag)"/>
+<text x="275" y="1405" class="m" text-anchor="start">Ctrl+C</text>
+<rect x="70" y="1440" width="390" height="40" rx="8" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+<text x="265.0" y="1456.2" class="t" text-anchor="middle">KeyboardInterrupt</text>
+<text x="265.0" y="1472.8" class="s" text-anchor="middle">loop di thread utama terputus</text>
+<rect x="520" y="935" width="160" height="44" rx="8" fill="#fef3c7" stroke="#f59e0b" stroke-width="1.5"/>
+<text x="600.0" y="953.2" class="t" text-anchor="middle">antrian_segmen</text>
+<text x="600.0" y="969.8" class="s" text-anchor="middle">maxsize=2, buang terlama</text>
+<path d="M460,1317 H600 V979" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<text x="608" y="1150" class="m" text-anchor="start">jendela audio</text>
+<text x="608" y="1165" class="m" text-anchor="start">atau AKHIR</text>
+<path d="M680,957 H740" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="740" y="935" width="390" height="44" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+<text x="935.0" y="953.2" class="t" text-anchor="middle">PengendaliEkspresi.loop()</text>
+<text x="935.0" y="969.8" class="s" text-anchor="middle">while not berhenti.is_set(): get(timeout 0,2)</text>
+<path d="M935,979 V1003" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="740" y="1003" width="390" height="104" rx="8" fill="#ffedd5" stroke="#fb923c" stroke-width="1.5"/>
+<text x="935.0" y="1026.5" class="t" text-anchor="middle">item dari antrian_segmen?</text>
+<text x="935.0" y="1043.0" class="s" text-anchor="middle">kosong (timeout) → _saat_diam() (netral jika &gt; 2,5 dtk)</text>
+<text x="935.0" y="1059.5" class="s" text-anchor="middle">AKHIR → ema = None (frasa baru dinilai segar)</text>
+<text x="935.0" y="1076.0" class="s" text-anchor="middle">None → break, thread berhenti</text>
+<text x="935.0" y="1092.5" class="s" text-anchor="middle">jendela audio → _proses()</text>
+<path d="M935,1107 V1131" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<text x="945" y="1124" class="m" text-anchor="start">jendela audio</text>
+<rect x="740" y="1131" width="390" height="44" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+<text x="935.0" y="1149.2" class="t" text-anchor="middle">_proses(): pengenal.probabilitas(audio)</text>
+<text x="935.0" y="1165.8" class="s" text-anchor="middle">extractor → wav2vec2 → softmax</text>
+<path d="M935,1175 V1195" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="740" y="1195" width="390" height="44" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+<text x="935.0" y="1213.2" class="t" text-anchor="middle">peredam EMA</text>
+<text x="935.0" y="1229.8" class="s" text-anchor="middle">ema = 0,6 · ema + 0,4 · probs</text>
+<path d="M935,1239 V1259" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="740" y="1259" width="390" height="60" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+<text x="935.0" y="1277.0" class="t" text-anchor="middle">_skor_ekspresi()</text>
+<text x="935.0" y="1293.5" class="s" text-anchor="middle">label → senyum / netral / sedih / marah / kaget</text>
+<text x="935.0" y="1310.0" class="s" text-anchor="middle">bobot sedih ×1,8 · netral ×0,7, lalu normalisasi</text>
+<path d="M935,1319 V1339" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="740" y="1339" width="390" height="44" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+<text x="935.0" y="1357.2" class="t" text-anchor="middle">pose.hitung_pose(skor, ambang 0,4)</text>
+<text x="935.0" y="1373.8" class="s" text-anchor="middle">7 gerakan, tiap nilai -10 … 10</text>
+<path d="M935,1383 V1403" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="740" y="1403" width="390" height="60" rx="8" fill="#dcfce7" stroke="#22c55e" stroke-width="1.5"/>
+<text x="935.0" y="1421.0" class="t" text-anchor="middle">servo.kirim(pose)</text>
+<text x="935.0" y="1437.5" class="s" text-anchor="middle">ke_tick → bingkai UART, hanya jika pose berubah</text>
+<text x="935.0" y="1454.0" class="s" text-anchor="middle">tanpa --port: pose dicetak ke terminal</text>
+<path d="M935,1463 V1483" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="740" y="1483" width="390" height="44" rx="8" fill="#fce7f3" stroke="#ec4899" stroke-width="1.5"/>
+<text x="935.0" y="1501.2" class="t" text-anchor="middle">ESP32 → PCA9685 (I2C) → 11 servo</text>
+<text x="935.0" y="1517.8" class="s" text-anchor="middle">wajah bergerak</text>
+<path d="M1130,1433 H1150 V957 H1130" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<text x="0" y="0" class="m" text-anchor="middle" transform="translate(1163 1200) rotate(-90)">ulang terus</text>
+<rect x="40" y="1590" width="1120" height="325" rx="12" fill="#fafafa" stroke="#d1d5db" stroke-width="1.2"/>
+<text x="56" y="1612" class="h" text-anchor="start" fill="#374151">Penutupan</text>
+<path d="M265,1480 V1580 H600 V1625" fill="none" stroke="#4b5563" stroke-width="1.6" stroke-dasharray="5 4" marker-end="url(#ag)"/>
+<rect x="400" y="1630" width="400" height="36" rx="8" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+<text x="600.0" y="1652.5" class="t" text-anchor="middle">except KeyboardInterrupt: cetak [berhenti]</text>
+<path d="M600,1666 V1686" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="300" y="1686" width="600" height="88" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="1709.8" class="t" text-anchor="middle">finally di pipeline.jalankan()</text>
+<text x="600.0" y="1726.2" class="s" text-anchor="middle">berhenti.set() · kirim sentinel None ke antrian_segmen</text>
+<text x="600.0" y="1742.8" class="s" text-anchor="middle">pekerja.join(timeout 2 dtk) → thread 'inferensi' selesai</text>
+<text x="600.0" y="1759.2" class="s" text-anchor="middle">vad.reset_states() · stream mic ditutup (with penangkap)</text>
+<path d="M600,1774 V1794" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="300" y="1794" width="600" height="44" rx="8" fill="#f3f4f6" stroke="#9ca3af" stroke-width="1.5"/>
+<text x="600.0" y="1812.2" class="t" text-anchor="middle">jalankan() return 0 → kembali ke main()</text>
+<text x="600.0" y="1828.8" class="s" text-anchor="middle">finally: servo.tutup() → kirim pose netral, tutup port</text>
+<path d="M600,1838 V1858" fill="none" stroke="#4b5563" stroke-width="1.6" marker-end="url(#ag)"/>
+<rect x="480" y="1858" width="240" height="36" rx="18" fill="#ede9fe" stroke="#8b5cf6" stroke-width="1.5"/>
+<text x="600.0" y="1880.5" class="t" text-anchor="middle">SystemExit(0): program selesai</text>
+</svg>
